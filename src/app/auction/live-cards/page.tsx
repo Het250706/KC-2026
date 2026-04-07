@@ -333,29 +333,113 @@ function RevealContent() {
                 </div>
             </div>
 
-            {/* REVEAL POPUP - INSIDE MAIN OVERLAY FOR PERFECT CENTER */}
+            {/* REVEAL POPUP - ULTRA PREMIUM CINEMATIC VERSION */}
             <AnimatePresence>
                 {revealPopup && (
                     <>
-                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setRevealPopup(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', zIndex: 100000, backdropFilter: 'blur(20px)' }} />
                         <motion.div 
-                            initial={{ scale: 0.5, opacity: 0 }} 
-                            animate={{ scale: 1, opacity: 1 }} 
-                            exit={{ scale: 0.8, opacity: 0 }} 
-                            style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 100001, width: 'min(90vw, 600px)', textAlign: 'center' }}
-                        >
-                            <div style={{ background: 'linear-gradient(90deg, transparent, var(--primary), transparent)', padding: '10px 60px', color: '#000', fontWeight: 950, letterSpacing: '10px', fontSize: '1rem', display: 'inline-block', marginBottom: '30px', borderRadius: '50px' }}>REVEALED</div>
-                            <div style={{ width: '100%', aspectRatio: '1/1', borderRadius: '50px', border: '12px solid var(--primary)', overflow: 'hidden', boxShadow: '0 0 100px rgba(255,215,0,0.5)', background: '#111', marginBottom: '30px' }}>
-                                <img src={fixPhotoUrl(revealPopup.player?.photo_url, revealPopup.player?.first_name)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                            </div>
-                            <h2 style={{ fontSize: '5rem', fontWeight: 950, margin: 0, lineHeight: 0.8 }}>
-                                {revealPopup.player?.first_name.toUpperCase()}<br/>
-                                <span style={{ color: 'var(--primary)', textShadow: '0 0 30px rgba(255,215,0,0.4)' }}>{(revealPopup.player?.last_name || '').toUpperCase()}</span>
-                            </h2>
-                            <div style={{ fontSize: '2rem', fontWeight: 950, color: '#fff', marginTop: '15px' }}>
-                                JOINED <span style={{ color: 'var(--primary)' }}>{(revealPopup.team?.name || 'THE SQUAD').toUpperCase()}</span>
-                            </div>
-                        </motion.div>
+                            initial={{ opacity: 0 }} 
+                            animate={{ opacity: 1 }} 
+                            exit={{ opacity: 0 }} 
+                            onClick={() => setRevealPopup(null)} 
+                            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.95)', zIndex: 100000, backdropFilter: 'blur(30px)' }} 
+                        />
+                        <div style={{ 
+                            position: 'fixed', 
+                            inset: 0, 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'center', 
+                            zIndex: 100001,
+                            pointerEvents: 'none'
+                        }}>
+                            <motion.div 
+                                initial={{ scale: 0.3, opacity: 0, rotateY: 90 }} 
+                                animate={{ scale: 1, opacity: 1, rotateY: 0 }} 
+                                exit={{ scale: 1.5, opacity: 0, filter: 'blur(40px)' }} 
+                                transition={{ type: 'spring', damping: 15, stiffness: 100 }}
+                                style={{ 
+                                    width: 'min(95vw, 1000px)', 
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    gap: '20px',
+                                    textAlign: 'center',
+                                    pointerEvents: 'auto'
+                                }}
+                            >
+                                {/* Rotating Background Glow */}
+                                <motion.div 
+                                    animate={{ rotate: 360 }}
+                                    transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
+                                    style={{
+                                        position: 'absolute',
+                                        top: '50%',
+                                        left: '50%',
+                                        width: '1200px',
+                                        height: '1200px',
+                                        transform: 'translate(-50%, -50%)',
+                                        background: 'conic-gradient(from 0deg, transparent, var(--primary), transparent, var(--primary), transparent)',
+                                        opacity: 0.1,
+                                        filter: 'blur(100px)',
+                                        zIndex: -1
+                                    }}
+                                />
+
+                                <div style={{ 
+                                    background: 'linear-gradient(90deg, transparent, var(--primary), transparent)', 
+                                    padding: '12px 140px', 
+                                    color: '#000', 
+                                    fontWeight: 950, 
+                                    letterSpacing: '8px', 
+                                    fontSize: '1.6rem', 
+                                    borderRadius: '50px',
+                                    boxShadow: '0 0 70px var(--primary-glow)',
+                                    marginBottom: '10px',
+                                    textTransform: 'uppercase'
+                                }}>
+                                    KESHAV CUP 2026
+                                </div>
+
+                                <div style={{ 
+                                    height: '52vh',
+                                    width: 'auto',
+                                    aspectRatio: '1/1', 
+                                    borderRadius: '40px', 
+                                    border: '12px solid var(--primary)', 
+                                    overflow: 'hidden', 
+                                    boxShadow: '0 0 100px rgba(255,215,0,0.4)', 
+                                    background: '#111', 
+                                    position: 'relative'
+                                }}>
+                                    <img src={fixPhotoUrl(revealPopup.player?.photo_url, revealPopup.player?.first_name)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    {/* Bottom Overlay for Team */}
+                                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(to top, rgba(0,0,0,1) 0%, transparent 100%)', padding: '60px 40px 20px' }}>
+                                        <div style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--primary)', letterSpacing: '8px', textTransform: 'uppercase' }}>
+                                            {revealPopup.team?.name}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <motion.div
+                                    initial={{ y: 30, opacity: 0 }}
+                                    animate={{ y: 0, opacity: 1 }}
+                                    transition={{ delay: 0.3 }}
+                                    style={{ width: '100%' }}
+                                >
+                                    <h2 style={{ fontSize: 'min(9vw, 8rem)', fontWeight: 950, margin: '10px 0', lineHeight: 0.75, letterSpacing: '-5px' }}>
+                                        {revealPopup.player?.first_name.toUpperCase()}<br/>
+                                        <span style={{ color: 'var(--primary)', textShadow: '0 0 100px rgba(255,215,0,0.6)' }}>
+                                            {(revealPopup.player?.last_name || '').toUpperCase()}
+                                        </span>
+                                    </h2>
+                                    
+                                    <div style={{ fontSize: '2.4rem', fontWeight: 950, color: '#fff', letterSpacing: '4px', textTransform: 'uppercase', textShadow: '0 0 40px rgba(0,0,0,1)', marginTop: '5px' }}>
+                                        WELCOME TO <span style={{ color: 'var(--primary)' }}>{(revealPopup.team?.name || 'THE SQUAD').toUpperCase()}</span> SQUAD
+                                    </div>
+                                </motion.div>
+                            </motion.div>
+                        </div>
                     </>
                 )}
             </AnimatePresence>

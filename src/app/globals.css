@@ -277,4 +277,13 @@ vercel-live-feedback,
   margin: 0;
   padding: 0;
   overflow: hidden;
-}
+}
+
+/* GLOBAL DARK SELECT STYLING */
+select {
+  color-scheme: dark;
+}
+option {
+  background: #0a0a0a;
+  color: #fff;
+}
