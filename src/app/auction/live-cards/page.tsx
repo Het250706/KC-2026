@@ -308,7 +308,9 @@ function RevealContent() {
                                             <img src={fixPhotoUrl(card.player?.photo_url, card.player?.first_name)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                         </div>
                                         <div style={{ minWidth: 0 }}>
-                                            <div style={{ fontWeight: 950, fontSize: '1.2rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.player?.first_name}</div>
+                                            <div style={{ fontWeight: 950, fontSize: '1.2rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                {card.player?.first_name} {card.player?.last_name}
+                                            </div>
                                             <div style={{ fontSize: '0.8rem', color: 'var(--primary)', fontWeight: 900 }}>{card.picked_by_team?.name.toUpperCase()}</div>
                                         </div>
                                     </motion.div>

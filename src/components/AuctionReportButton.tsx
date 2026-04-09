@@ -38,40 +38,46 @@ export default function AuctionReportButton() {
         try {
             await loadScripts();
 
-            // 1. Fetch Data
-            const [teamsRes, playersRes] = await Promise.all([
-                supabase.from('teams').select('*').order('name'),
-                supabase.from('players').select('*').eq('auction_status', 'sold')
-            ]);
+            // 1. Fetch History Data
+            const { data: historyData, error } = await supabase
+                .from('slot_players')
+                .select('*, player:players(*), picked_by_team:teams(*)')
+                .eq('is_picked', true)
+                .order('picked_at', { ascending: false });
 
-            if (!teamsRes.data || !playersRes.data) {
-                throw new Error('Failed to fetch auction data');
-            }
+            if (error || !historyData) throw new Error('Failed to fetch history');
 
-            const teams = teamsRes.data;
-            const players = playersRes.data;
-
-            // 2. Group Players by Team
-            const teamGroups: Record<string, any[]> = {};
-            const teamTotals: Record<string, number> = {};
+            // 2. Pre-load Images (Premium Feature)
+            const playerImages: Record<string, HTMLImageElement> = {};
+            const logoImg = new Image();
             
-            teams.forEach(team => {
-                const teamPlayers = players
-                    .filter(p => (p.team_id === team.id || p.sold_to_team_id === team.id))
-                    .sort((a, b) => {
-                        const nameA = `${a.first_name} ${a.last_name}`.toLowerCase();
-                        const nameB = `${b.first_name} ${b.last_name}`.toLowerCase();
-                        return nameA.localeCompare(nameB);
-                    });
+            const loadAllImages = async () => {
+                const promises = historyData.map(async (row) => {
+                    if (row.player?.photo_url) {
+                        return new Promise((resolve) => {
+                            const img = new Image();
+                            img.crossOrigin = 'Anonymous';
+                            img.src = row.player.photo_url;
+                            img.onload = () => {
+                                playerImages[row.id] = img;
+                                resolve(true);
+                            };
+                            img.onerror = () => resolve(false);
+                        });
+                    }
+                });
                 
-                teamGroups[team.id] = teamPlayers;
-                teamTotals[team.id] = teamPlayers.reduce((sum, p) => sum + (p.sold_price || 0), 0);
-            });
+                // Add Logo Loading
+                promises.push(new Promise((resolve) => {
+                    logoImg.src = '/logo.png'; // Direct public path
+                    logoImg.onload = resolve;
+                    logoImg.onerror = resolve;
+                }));
 
-            // 3. Sort Teams (Alphabetical)
-            const sortedTeams = [...teams].sort((a, b) => {
-                return a.name.localeCompare(b.name);
-            });
+                await Promise.all(promises);
+            };
+
+            await loadAllImages();
 
             // 4. Initialize PDF
             const { jsPDF } = window.jspdf;
@@ -79,90 +85,80 @@ export default function AuctionReportButton() {
             const pageWidth = doc.internal.pageSize.width;
 
             // Header Section
-            // Dark Background for Header
             doc.setFillColor(10, 10, 10);
             doc.rect(0, 0, pageWidth, 45, 'F');
             
-            // Logo/Title
+            // Logo on both sides
+            if (logoImg.complete && logoImg.naturalWidth > 0) {
+                const logoDim = 25;
+                doc.addImage(logoImg, 'PNG', pageWidth / 2 - 85, 10, logoDim, logoDim);
+                doc.addImage(logoImg, 'PNG', pageWidth / 2 + 60, 10, logoDim, logoDim);
+            }
+
             doc.setTextColor(255, 215, 0); // Gold
             doc.setFontSize(28);
             doc.setFont('helvetica', 'bold');
             doc.text('KESHAV CUP 2026', pageWidth / 2, 22, { align: 'center' });
             
             doc.setTextColor(200, 200, 200);
-            doc.setFontSize(12);
+            doc.setFontSize(14);
             doc.setFont('helvetica', 'normal');
-            doc.text('OFFICIAL PLAYER SELECTION & AUCTION SUMMARY', pageWidth / 2, 32, { align: 'center' });
+            doc.text('OFFICIAL PLAYER SELECTION SUMMARY', pageWidth / 2, 33, { align: 'center' });
             
-            // Border Line
             doc.setDrawColor(255, 215, 0);
             doc.setLineWidth(1);
-            doc.line(20, 38, pageWidth - 20, 38);
+            doc.line(20, 39, pageWidth - 20, 39);
 
             let currentY = 55;
 
-            // 5. Add Teams and Players
-            sortedTeams.forEach((team, index) => {
-                const teamPlayers = teamGroups[team.id];
-                if (teamPlayers.length === 0) return; // Skip teams with no players
-                
-                // Page Break Check
-                if (currentY > 220) {
-                    doc.addPage();
-                    currentY = 20;
-                }
+            // Player List Table
+            const tableData = historyData.map((row, i) => [
+                '', // Placeholder for IMG column
+                `${row.player?.first_name} ${row.player?.last_name}`,
+                row.picked_by_team?.name?.toUpperCase() || 'UNKNOWN',
+                'SOLD',
+                row.picked_at ? new Date(row.picked_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'
+            ]);
 
-                // Team Banner
-                doc.setFillColor(240, 240, 240);
-                doc.rect(14, currentY, pageWidth - 28, 12, 'F');
-                
-                doc.setDrawColor(0, 0, 0);
-                doc.setLineWidth(0.5);
-                doc.line(14, currentY, 14, currentY + 12); // Accent line
-                
-                doc.setTextColor(0, 0, 0);
-                doc.setFontSize(14);
-                doc.setFont('helvetica', 'bold');
-                doc.text(`${team.name.toUpperCase()}`, 18, currentY + 8.5);
-                
-                doc.setFontSize(9);
-                doc.setTextColor(80, 80, 80);
-                doc.text(`Total Players: ${teamPlayers.length}`, pageWidth - 18, currentY + 8, { align: 'right' });
-
-                currentY += 16;
-
-                // Player List Table
-                const tableData = teamPlayers.map((p, i) => [
-                    (i + 1).toString(),
-                    `${p.first_name} ${p.last_name}`,
-                    p.cricket_skill || p.category || 'Player'
-                ]);
-
-                (doc as any).autoTable({
-                    startY: currentY,
-                    head: [['#', 'PLAYER NAME', 'CATEGORY / SKILL']],
-                    body: tableData,
-                    theme: 'grid',
-                    headStyles: { 
-                        fillColor: [30, 30, 30], 
-                        textColor: [255, 215, 0], 
-                        fontStyle: 'bold',
-                        fontSize: 10,
-                        halign: 'center'
-                    },
-                    columnStyles: {
-                        0: { halign: 'center', cellWidth: 15 },
-                        1: { fontStyle: 'bold', halign: 'center', cellWidth: 'auto', fontSize: 11 },
-                        2: { halign: 'center', cellWidth: 60 }
-                    },
-                    styles: { fontSize: 9, cellPadding: 5 },
-                    margin: { left: 14, right: 14 },
-                    didDrawPage: (data: any) => {
-                        currentY = data.cursor.y;
+            (doc as any).autoTable({
+                startY: currentY,
+                head: [['IMG', 'PLAYER NAME', 'TEAM NAME', 'STATUS', 'REVEAL TIME']],
+                body: tableData,
+                theme: 'grid',
+                headStyles: { 
+                    fillColor: [30, 30, 30], 
+                    textColor: [255, 215, 0], 
+                    fontStyle: 'bold',
+                    fontSize: 10,
+                    halign: 'center'
+                },
+                columnStyles: {
+                    0: { cellWidth: 25, halign: 'center' },
+                    1: { halign: 'center', cellWidth: 'auto' },
+                    2: { halign: 'center', cellWidth: 45 },
+                    3: { halign: 'center', cellWidth: 30 },
+                    4: { halign: 'center', cellWidth: 40 }
+                },
+                styles: { 
+                    fontSize: 11, 
+                    cellPadding: 8, 
+                    valign: 'middle', 
+                    fontStyle: 'bold',
+                    textColor: [40, 40, 40] 
+                },
+                margin: { left: 14, right: 14 },
+                didDrawCell: (data: any) => {
+                    if (data.section === 'body' && data.column.index === 0) {
+                        const rowId = historyData[data.row.index].id;
+                        const img = playerImages[rowId];
+                        if (img) {
+                            const dim = 12;
+                            const x = data.cell.x + (data.cell.width - dim) / 2;
+                            const y = data.cell.y + (data.cell.height - dim) / 2;
+                            doc.addImage(img, 'JPEG', x, y, dim, dim);
+                        }
                     }
-                });
-
-                currentY += 15;
+                }
             });
 
             // 6. Final Footer

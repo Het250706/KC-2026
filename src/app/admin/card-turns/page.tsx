@@ -190,7 +190,7 @@ function TurnManagementContent() {
                     >
                         {slots.map(s => (
                             <option key={s.id} value={s.id}>
-                                { (s as any).slot_players?.[0]?.player?.category ? (s as any).slot_players[0].player.category.toUpperCase() : `SLOT ${s.slot_number}` } ({ (s as any).status || 'PENDING' })
+                                { (s as any).slot_players?.[0]?.player?.category?.toUpperCase() || (s.slot_number ? `SLOT ${s.slot_number}` : 'UNASSIGNED SLOT') }
                             </option>
                         ))}
                     </select>

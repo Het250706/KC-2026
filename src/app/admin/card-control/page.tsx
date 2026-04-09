@@ -7,6 +7,7 @@ import RoleGuard from '@/components/RoleGuard';
 import { CardSlot, CardAuctionState } from '@/types/card-auction';
 import { Play, Square, Loader2, Sparkles, Activity, ShieldCheck, Timer, History as HistoryIcon, Shuffle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import AuctionReportButton from '@/components/AuctionReportButton';
 
 export default function CardControlPanel() {
     return (
@@ -26,12 +27,14 @@ function CardControlContent() {
     const fetchData = async () => {
         try {
             const [slotsRes, stateRes] = await Promise.all([
-                supabase.from('card_slots').select('*, slot_players(player:players(category))').in('status', ['pending', 'active']).order('slot_number'),
+                supabase.from('card_slots').select('*, slot_players(player:players(*))').order('slot_number', { ascending: false }),
                 supabase.from('card_auction_state').select('*').single()
             ]);
             if (slotsRes.data) {
                 setSlots(slotsRes.data);
-                if (slotsRes.data.length > 0) setSelectedSlotId(slotsRes.data[0].id);
+                if (slotsRes.data.length > 0 && !selectedSlotId) {
+                    setSelectedSlotId(slotsRes.data[0].id);
+                }
             }
             if (stateRes.data) setState(stateRes.data);
         } finally {
@@ -54,19 +57,14 @@ function CardControlContent() {
         if (!selectedSlotId) return;
         setActionLoading(true);
         try {
-            // 1. Determine if we are resuming or starting fresh
             const isResuming = state?.current_slot_id === selectedSlotId;
-            
             await supabase.from('card_auction_state').update({
                 current_slot_id: selectedSlotId,
                 current_turn: isResuming ? (state?.current_turn || 1) : 1,
                 is_active: true,
                 updated_at: new Date().toISOString()
             }).eq('id', 1);
-
-            // 2. Update Slot status
             await supabase.from('card_slots').update({ status: 'active' }).eq('id', selectedSlotId);
-
             alert('Card Auction Started!');
         } catch (err: any) {
             alert(err.message);
@@ -111,44 +109,69 @@ function CardControlContent() {
     };
 
     const handleUndoLastPick = async () => {
-        if (!state?.current_slot_id || state.current_turn <= 1) {
-            alert('No previous turns found for this slot.');
+        if (!state?.current_slot_id) {
+            alert('No active slot found in system state.');
             return;
         }
-        if (!confirm('Are you sure you want to undo the last card pick? This will move the player back to the cards and revert the turn.')) return;
-        
         setActionLoading(true);
         try {
-            // 1. Find the last picked card for this slot
-            const { data: lastCard } = await supabase
+            let { data: lastCard } = await supabase
                 .from('slot_players')
-                .select('*')
+                .select('*, player:players(*)')
                 .eq('slot_id', state.current_slot_id)
                 .eq('is_picked', true)
                 .order('picked_at', { ascending: false })
                 .limit(1)
-                .single();
+                .maybeSingle();
 
-            if (lastCard) {
-                // 2. Reset the card
-                await supabase.from('slot_players').update({
-                    is_picked: false,
-                    picked_by_team_id: null,
-                    picked_at: null,
-                    team_photo_id: null
-                }).eq('id', lastCard.id);
+            if (!lastCard) {
+                const { data: fallback } = await supabase
+                    .from('slot_players')
+                    .select('*, player:players(*)')
+                    .eq('slot_id', state.current_slot_id)
+                    .eq('is_picked', true)
+                    .limit(1)
+                    .maybeSingle();
+                lastCard = fallback;
+            }
 
-                // 3. Decrement turn
+            if (!lastCard) {
+                alert(`No revealed cards found to undo in slot: ${state.current_slot_id}`);
+                setActionLoading(false);
+                return;
+            }
+
+            if (!confirm(`Undo selection of ${lastCard.player?.first_name || 'this player'}? This will re-hide them and shuffle all cards.`)) {
+                setActionLoading(false);
+                return;
+            }
+
+            await supabase.from('slot_players').update({
+                is_picked: false,
+                picked_by_team_id: null,
+                picked_at: null,
+                team_photo_id: null
+            }).eq('id', lastCard.id);
+
+            if (state.current_turn > 1) {
                 await supabase.from('card_auction_state').update({
                     current_turn: state.current_turn - 1,
                     updated_at: new Date().toISOString()
                 }).eq('id', 1);
-
-                alert('Last pick undone successfully!');
-                fetchData();
-            } else {
-                alert('No picked cards found to undo.');
             }
+
+            const { data: allPlayers } = await supabase.from('slot_players').select('id').eq('slot_id', state.current_slot_id);
+            if (allPlayers && allPlayers.length > 0) {
+                const positionsCount = Math.max(8, allPlayers.length);
+                const availablePositions = Array.from({ length: positionsCount }, (_, i) => i + 1);
+                const shuffledPositions = availablePositions.sort(() => Math.random() - 0.5);
+                await Promise.all(allPlayers.map((card, idx) => 
+                    supabase.from('slot_players').update({ card_position: shuffledPositions[idx] }).eq('id', card.id)
+                ));
+            }
+
+            alert('Last pick undone and all cards reshuffled!');
+            fetchData();
         } catch (err: any) {
             alert(err.message);
         } finally {
@@ -158,30 +181,49 @@ function CardControlContent() {
 
     const handleShuffleRemaining = async () => {
         if (!state?.current_slot_id) return;
-        if (!confirm('This will reshuffle all UNPICKED cards in the current slot for extra surprise. Continue?')) return;
-
+        if (!confirm('This will reshuffle all UNPICKED cards among themselves. Revealed cards will stay in their places. Continue?')) return;
         setActionLoading(true);
         try {
-            // 1. Fetch unpicked cards
-            const { data: unpicked } = await supabase
-                .from('slot_players')
-                .select('id')
-                .eq('slot_id', state.current_slot_id)
-                .eq('is_picked', false);
-
+            const { data: unpicked } = await supabase.from('slot_players').select('id, card_position').eq('slot_id', state.current_slot_id).eq('is_picked', false);
             if (unpicked && unpicked.length > 0) {
-                // 2. Generate new random positions
-                const availablePositions = Array.from({ length: 8 }, (_, i) => i + 1); // Assuming 8 cards
-                const shuffledPositions = availablePositions.sort(() => Math.random() - 0.5);
-                
-                // 3. Update each card with a unique position from the shuffled list
+                const currentPositions = unpicked.map(p => p.card_position);
+                const shuffledPositions = [...currentPositions].sort(() => Math.random() - 0.5);
                 await Promise.all(unpicked.map((card, idx) => 
                     supabase.from('slot_players').update({ card_position: shuffledPositions[idx] }).eq('id', card.id)
                 ));
-
-                alert('Remaining cards reshuffled successfully!');
+                alert('Remaining cards reshuffled among themselves!');
                 fetchData();
             }
+        } catch (err: any) {
+            alert(err.message);
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const handleShuffleAll = async () => {
+        if (!state?.current_slot_id) return;
+        if (!confirm('This will RESET all picked cards and scatter EVERYONE to new random positions. Continue?')) return;
+        setActionLoading(true);
+        try {
+            await supabase.from('slot_players').update({
+                is_picked: false,
+                picked_by_team_id: null,
+                picked_at: null,
+                team_photo_id: null
+            }).eq('slot_id', state.current_slot_id);
+            await supabase.from('card_auction_state').update({ current_turn: 1, updated_at: new Date().toISOString() }).eq('id', 1);
+            const { data: allPlayers } = await supabase.from('slot_players').select('id').eq('slot_id', state.current_slot_id);
+            if (allPlayers && allPlayers.length > 0) {
+                const positionsCount = Math.max(8, allPlayers.length);
+                const availablePositions = Array.from({ length: positionsCount }, (_, i) => i + 1);
+                const shuffledPositions = availablePositions.sort(() => Math.random() - 0.5);
+                await Promise.all(allPlayers.map((card, idx) => 
+                    supabase.from('slot_players').update({ card_position: shuffledPositions[idx] }).eq('id', card.id)
+                ));
+            }
+            alert('Slot reset and everyone shuffled!');
+            fetchData();
         } catch (err: any) {
             alert(err.message);
         } finally {
@@ -240,17 +282,19 @@ function CardControlContent() {
                             <div style={{ background: 'rgba(255,255,255,0.02)', padding: '25px', borderRadius: '25px', border: '1px solid rgba(255,255,255,0.03)' }}>
                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 800, marginBottom: '5px', letterSpacing: '1px' }}>CURRENT SLOT</div>
                                 <div style={{ fontSize: '1.8rem', fontWeight: 950 }}>
-                                    {state?.current_slot_id ? (
-                                        slots.find(s => s.id === state.current_slot_id)
-                                            ? (slots.find(s => s.id === state.current_slot_id) as any).slot_players?.[0]?.player?.category?.toUpperCase() || 'SLOT LOADED'
-                                            : 'SLOT LOADED'
-                                    ) : 'NONE'}
+                                    {state?.is_active && state?.current_slot_id ? (
+                                        (() => {
+                                            const currentSlot = slots.find(s => s.id === state.current_slot_id);
+                                            const category = (currentSlot as any)?.slot_players?.[0]?.player?.category;
+                                            return category ? category.toUpperCase() : (currentSlot ? `SLOT ${currentSlot.slot_number}` : 'LOADING...');
+                                        })()
+                                    ) : '---'}
                                 </div>
                             </div>
 
                             <div style={{ background: 'rgba(255,255,255,0.02)', padding: '25px', borderRadius: '25px', border: '1px solid rgba(255,255,255,0.03)' }}>
                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 800, marginBottom: '5px', letterSpacing: '1px' }}>ACTIVE TURN</div>
-                                <div style={{ fontSize: '1.8rem', fontWeight: 950 }}>TURN #{state?.current_turn}</div>
+                                <div style={{ fontSize: '1.8rem', fontWeight: 950 }}>{state?.is_active ? `TURN #${state?.current_turn}` : '---'}</div>
                             </div>
                         </div>
 
@@ -279,11 +323,15 @@ function CardControlContent() {
                                 style={{ width: '100%', padding: '15px 25px', borderRadius: '15px', background: 'rgba(255,255,255,0.03)', color: '#fff', border: '1px solid rgba(255,255,255,0.05)', fontWeight: 950, fontSize: '1rem' }}
                             >
                                 <option value="" disabled>--- Select a Slot ---</option>
-                                {slots.map(s => (
-                                    <option key={s.id} value={s.id}>
-                                    { (s as any).slot_players?.[0]?.player?.category ? (s as any).slot_players[0].player.category.toUpperCase() : `SLOT ${s.slot_number}` } ({s.status})
-                                    </option>
-                                ))}
+                                {slots.filter(s => s.status === 'pending').map(s => {
+                                    const category = (s as any).slot_players?.[0]?.player?.category;
+                                    const displayName = category ? category.toUpperCase() : (s.slot_number ? `SLOT ${s.slot_number}` : 'UNASSIGNED SLOT');
+                                    return (
+                                        <option key={s.id} value={s.id}>
+                                            {displayName}
+                                        </option>
+                                    );
+                                })}
                             </select>
                         </div>
 
@@ -307,7 +355,7 @@ function CardControlContent() {
                                     onClick={handleUndoLastPick}
                                     style={{ flex: 1, padding: '15px', background: 'rgba(255,165,0,0.1)', color: '#ffa500', border: '1px solid rgba(255,165,0,0.3)', borderRadius: '15px', fontWeight: 900, fontSize: '0.75rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
                                 >
-                                    <HistoryIcon size={16} /> UNDO LAST PICK
+                                    <HistoryIcon size={16} /> UNDO & SHUFFLE
                                 </button>
                                 <button 
                                     onClick={handleShuffleRemaining}
@@ -318,6 +366,12 @@ function CardControlContent() {
                             </div>
                             
                             <div style={{ display: 'flex', gap: '10px' }}>
+                                <button 
+                                    onClick={handleShuffleAll}
+                                    style={{ flex: 1, padding: '12px', background: 'rgba(0,255,128,0.05)', color: '#00ff80', border: '1px solid rgba(0,255,128,0.2)', borderRadius: '12px', fontWeight: 900, fontSize: '0.7rem', cursor: 'pointer', transition: 'all 0.3s' }}
+                                >
+                                    SHUFFLE ALL (RESET)
+                                </button>
                                 <button 
                                     onClick={handleHardReset}
                                     style={{ flex: 1, padding: '12px', background: 'rgba(255,75,75,0.05)', color: '#ff4b4b', border: '1px solid rgba(255,75,75,0.2)', borderRadius: '12px', fontWeight: 900, fontSize: '0.7rem', cursor: 'pointer', transition: 'all 0.3s' }}
@@ -333,7 +387,6 @@ function CardControlContent() {
                             </div>
                         </div>
                     </div>
-
                 </div>
             </div>
         </main>

@@ -175,8 +175,8 @@ function SlotManagementContent() {
                                         >
                                             <ChevronDown size={22} color="var(--primary)" />
                                         </div>
-                                        <div style={{ fontSize: '1.4rem', fontWeight: 950, letterSpacing: '1px' }}>
-                                            { slot.category.toUpperCase() }
+                                        <div style={{ fontSize: '1.2rem', fontWeight: 950 }}>
+                                            { (slot as any).slot_players?.[0]?.player?.category?.toUpperCase() || (slot.slot_number ? `SLOT ${slot.slot_number}` : 'UNASSIGNED SLOT') }
                                         </div>
                                     </div>
                                     <div style={{ padding: '6px 12px', borderRadius: '50px', background: slot.status === 'completed' ? 'rgba(0,255,128,0.1)' : slot.is_new ? 'rgba(56, 189, 248, 0.1)' : 'rgba(255,215,0,0.1)', color: slot.status === 'completed' ? '#00ff80' : slot.is_new ? '#38bdf8' : 'var(--primary)', fontWeight: 900, fontSize: '0.7rem' }}>
