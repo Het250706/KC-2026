@@ -102,7 +102,8 @@ function TurnManagementContent() {
                 if (slotIdParam && slotsRes.data.some(s => s.id === slotIdParam)) {
                     setSelectedSlotId(slotIdParam);
                 } else if (slotsRes.data.length > 0) {
-                    setSelectedSlotId(slotsRes.data[0].id);
+                    const firstPending = slotsRes.data.find(s => s.status === 'pending');
+                    setSelectedSlotId(firstPending ? firstPending.id : slotsRes.data[0].id);
                 }
             }
             if (teamsRes.data) setTeams(teamsRes.data);
@@ -188,7 +189,7 @@ function TurnManagementContent() {
                         onChange={(e) => setSelectedSlotId(e.target.value)}
                         style={{ padding: '12px 25px', borderRadius: '15px', background: 'rgba(255,255,255,0.03)', color: '#fff', border: '1px solid rgba(255,255,255,0.05)', fontWeight: 950, fontSize: '0.85rem' }}
                     >
-                        {slots.map(s => (
+                        {slots.filter(s => s.status === 'pending').map(s => (
                             <option key={s.id} value={s.id}>
                                 { (s as any).slot_players?.[0]?.player?.category?.toUpperCase() || (s.slot_number ? `SLOT ${s.slot_number}` : 'UNASSIGNED SLOT') }
                             </option>
