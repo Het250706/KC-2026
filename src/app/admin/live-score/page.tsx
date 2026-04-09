@@ -352,23 +352,14 @@ function AdminLiveScoreContent() {
     }, [strikerId, bowlerId, currentInnings?.id]);
 
     const fetchMatchEvents = async (matchId: string) => {
-        // Try to fetch with striker_id, fallback to batsman_id if it fails
         const { data, error } = await supabase.from('match_events').select(`
             *,
-            striker:players!striker_id(*),
-            bowler:players!bowler_id(*),
-            dismissed:players!dismissed_player_id(*)
+            striker:players!batsman_id(*),
+            bowler:players!bowler_id(*)
         `).eq('match_id', matchId).order('created_at', { ascending: true });
 
         if (error) {
             console.error('FETCH_EVENTS_ERROR:', error);
-            // Fallback for older schema
-            const { data: fallbackData } = await supabase.from('match_events').select(`
-                *,
-                striker:players!batsman_id(*),
-                bowler:players!bowler_id(*)
-            `).eq('match_id', matchId).order('created_at', { ascending: true });
-            if (fallbackData) setMatchEvents(fallbackData);
         } else if (data) {
             setMatchEvents(data);
         }
@@ -401,7 +392,6 @@ function AdminLiveScoreContent() {
             over_number: Math.floor(currentInnings?.overs || 0),
             ball_number: Math.round(((currentInnings?.overs || 0) % 1) * 10) + 1,
             batsman_id: strikerId,
-            striker_id: strikerId, // Compatibility
             bowler_id: bowlerId,
             runs: runs,
             is_wicket: isWicket,

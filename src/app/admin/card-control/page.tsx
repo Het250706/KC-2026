@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import Navbar from '@/components/Navbar';
 import RoleGuard from '@/components/RoleGuard';
 import { CardSlot, CardAuctionState } from '@/types/card-auction';
-import { Play, Square, Loader2, Sparkles, Activity, ShieldCheck, Timer } from 'lucide-react';
+import { Play, Square, Loader2, Sparkles, Activity, ShieldCheck, Timer, History as HistoryIcon, Shuffle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function CardControlPanel() {
@@ -26,7 +26,7 @@ function CardControlContent() {
     const fetchData = async () => {
         try {
             const [slotsRes, stateRes] = await Promise.all([
-                supabase.from('card_slots').select('*, slot_players(player:players(category))').eq('status', 'pending').order('slot_number'),
+                supabase.from('card_slots').select('*, slot_players(player:players(category))').in('status', ['pending', 'active']).order('slot_number'),
                 supabase.from('card_auction_state').select('*').single()
             ]);
             if (slotsRes.data) {
@@ -54,10 +54,12 @@ function CardControlContent() {
         if (!selectedSlotId) return;
         setActionLoading(true);
         try {
-            // 1. Update State
+            // 1. Determine if we are resuming or starting fresh
+            const isResuming = state?.current_slot_id === selectedSlotId;
+            
             await supabase.from('card_auction_state').update({
                 current_slot_id: selectedSlotId,
-                current_turn: 1,
+                current_turn: isResuming ? (state?.current_turn || 1) : 1,
                 is_active: true,
                 updated_at: new Date().toISOString()
             }).eq('id', 1);
@@ -101,6 +103,85 @@ function CardControlContent() {
             }).eq('id', 1);
             alert('System hard reset complete. All live connections cleared.');
             fetchData();
+        } catch (err: any) {
+            alert(err.message);
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const handleUndoLastPick = async () => {
+        if (!state?.current_slot_id || state.current_turn <= 1) {
+            alert('No previous turns found for this slot.');
+            return;
+        }
+        if (!confirm('Are you sure you want to undo the last card pick? This will move the player back to the cards and revert the turn.')) return;
+        
+        setActionLoading(true);
+        try {
+            // 1. Find the last picked card for this slot
+            const { data: lastCard } = await supabase
+                .from('slot_players')
+                .select('*')
+                .eq('slot_id', state.current_slot_id)
+                .eq('is_picked', true)
+                .order('picked_at', { ascending: false })
+                .limit(1)
+                .single();
+
+            if (lastCard) {
+                // 2. Reset the card
+                await supabase.from('slot_players').update({
+                    is_picked: false,
+                    picked_by_team_id: null,
+                    picked_at: null,
+                    team_photo_id: null
+                }).eq('id', lastCard.id);
+
+                // 3. Decrement turn
+                await supabase.from('card_auction_state').update({
+                    current_turn: state.current_turn - 1,
+                    updated_at: new Date().toISOString()
+                }).eq('id', 1);
+
+                alert('Last pick undone successfully!');
+                fetchData();
+            } else {
+                alert('No picked cards found to undo.');
+            }
+        } catch (err: any) {
+            alert(err.message);
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const handleShuffleRemaining = async () => {
+        if (!state?.current_slot_id) return;
+        if (!confirm('This will reshuffle all UNPICKED cards in the current slot for extra surprise. Continue?')) return;
+
+        setActionLoading(true);
+        try {
+            // 1. Fetch unpicked cards
+            const { data: unpicked } = await supabase
+                .from('slot_players')
+                .select('id')
+                .eq('slot_id', state.current_slot_id)
+                .eq('is_picked', false);
+
+            if (unpicked && unpicked.length > 0) {
+                // 2. Generate new random positions
+                const availablePositions = Array.from({ length: 8 }, (_, i) => i + 1); // Assuming 8 cards
+                const shuffledPositions = availablePositions.sort(() => Math.random() - 0.5);
+                
+                // 3. Update each card with a unique position from the shuffled list
+                await Promise.all(unpicked.map((card, idx) => 
+                    supabase.from('slot_players').update({ card_position: shuffledPositions[idx] }).eq('id', card.id)
+                ));
+
+                alert('Remaining cards reshuffled successfully!');
+                fetchData();
+            }
         } catch (err: any) {
             alert(err.message);
         } finally {
@@ -158,7 +239,13 @@ function CardControlContent() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                             <div style={{ background: 'rgba(255,255,255,0.02)', padding: '25px', borderRadius: '25px', border: '1px solid rgba(255,255,255,0.03)' }}>
                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 800, marginBottom: '5px', letterSpacing: '1px' }}>CURRENT SLOT</div>
-                                <div style={{ fontSize: '1.8rem', fontWeight: 950 }}>{state?.current_slot_id ? 'SLOT LOADED' : 'NONE'}</div>
+                                <div style={{ fontSize: '1.8rem', fontWeight: 950 }}>
+                                    {state?.current_slot_id ? (
+                                        slots.find(s => s.id === state.current_slot_id)
+                                            ? (slots.find(s => s.id === state.current_slot_id) as any).slot_players?.[0]?.player?.category?.toUpperCase() || 'SLOT LOADED'
+                                            : 'SLOT LOADED'
+                                    ) : 'NONE'}
+                                </div>
                             </div>
 
                             <div style={{ background: 'rgba(255,255,255,0.02)', padding: '25px', borderRadius: '25px', border: '1px solid rgba(255,255,255,0.03)' }}>
@@ -194,7 +281,7 @@ function CardControlContent() {
                                 <option value="" disabled>--- Select a Slot ---</option>
                                 {slots.map(s => (
                                     <option key={s.id} value={s.id}>
-                                        { (s as any).slot_players?.[0]?.player?.category?.toUpperCase() || `SLOT ${s.slot_number}` } ({s.status})
+                                    { (s as any).slot_players?.[0]?.player?.category ? (s as any).slot_players[0].player.category.toUpperCase() : `SLOT ${s.slot_number}` } ({s.status})
                                     </option>
                                 ))}
                             </select>
@@ -214,19 +301,36 @@ function CardControlContent() {
                         </div>
 
                         {/* Maintenance Block */}
-                        <div style={{ marginTop: '40px', paddingTop: '30px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', gap: '10px' }}>
-                            <button 
-                                onClick={handleHardReset}
-                                style={{ flex: 1, padding: '12px', background: 'rgba(255,75,75,0.05)', color: '#ff4b4b', border: '1px solid rgba(255,75,75,0.2)', borderRadius: '12px', fontWeight: 900, fontSize: '0.7rem', cursor: 'pointer', transition: 'all 0.3s' }}
-                            >
-                                HARD RESET STATE
-                            </button>
-                            <button 
-                                onClick={handleResetAllSlots}
-                                style={{ flex: 1, padding: '12px', background: 'rgba(255,255,255,0.02)', color: '#888', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px', fontWeight: 900, fontSize: '0.7rem', cursor: 'pointer', transition: 'all 0.3s' }}
-                            >
-                                RESET ALL SLOTS
-                            </button>
+                        <div style={{ marginTop: '30px', padding: '20px', background: 'rgba(255,255,255,0.02)', borderRadius: '25px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            <div style={{ display: 'flex', gap: '10px' }}>
+                                <button 
+                                    onClick={handleUndoLastPick}
+                                    style={{ flex: 1, padding: '15px', background: 'rgba(255,165,0,0.1)', color: '#ffa500', border: '1px solid rgba(255,165,0,0.3)', borderRadius: '15px', fontWeight: 900, fontSize: '0.75rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                                >
+                                    <HistoryIcon size={16} /> UNDO LAST PICK
+                                </button>
+                                <button 
+                                    onClick={handleShuffleRemaining}
+                                    style={{ flex: 1, padding: '15px', background: 'rgba(56,189,248,0.1)', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.3)', borderRadius: '15px', fontWeight: 900, fontSize: '0.75rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                                >
+                                    <Shuffle size={16} /> SHUFFLE REMAINING
+                                </button>
+                            </div>
+                            
+                            <div style={{ display: 'flex', gap: '10px' }}>
+                                <button 
+                                    onClick={handleHardReset}
+                                    style={{ flex: 1, padding: '12px', background: 'rgba(255,75,75,0.05)', color: '#ff4b4b', border: '1px solid rgba(255,75,75,0.2)', borderRadius: '12px', fontWeight: 900, fontSize: '0.7rem', cursor: 'pointer', transition: 'all 0.3s' }}
+                                >
+                                    HARD RESET STATE
+                                </button>
+                                <button 
+                                    onClick={handleResetAllSlots}
+                                    style={{ flex: 1, padding: '12px', background: 'rgba(255,255,255,0.02)', color: '#888', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px', fontWeight: 900, fontSize: '0.7rem', cursor: 'pointer', transition: 'all 0.3s' }}
+                                >
+                                    RESET ALL SLOTS
+                                </button>
+                            </div>
                         </div>
                     </div>
 

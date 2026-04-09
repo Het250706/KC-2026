@@ -33,6 +33,9 @@ function AdminDashboardContent() {
     const [showSlotManager, setShowSlotManager] = useState(false);
     const [newSlotName, setNewSlotName] = useState('');
     const [reAuctionLoading, setReAuctionLoading] = useState(false);
+    const [allSlots, setAllSlots] = useState<string[]>([]);
+    const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
+    const [newSlotInput, setNewSlotInput] = useState('');
     const router = useRouter();
 
     const [registrationsCount, setRegistrationsCount] = useState(0);
@@ -51,9 +54,15 @@ function AdminDashboardContent() {
             if (teamsRes.data) setTeams(teamsRes.data);
             if (regRes.count !== null) setRegistrationsCount(regRes.count);
 
-            if (stateRes.error && stateRes.error.code !== 'PGRST116') {
-                console.error('Auction State Error:', stateRes.error);
-            }
+            // Combine unique slots from both tables for dropdowns
+            const playerCats = playersRes.data?.map(p => p.category).filter(Boolean) || [];
+            
+            // Fetch ALL registration slots to populate the dropdown
+            const { data: allRegs } = await supabase.from('registrations').select('slot');
+            const regSlots = allRegs?.map(r => r.slot).filter(Boolean) || [];
+            
+            const merged = Array.from(new Set([...playerCats, ...regSlots, 'Unassigned'])).sort();
+            setAllSlots(merged.filter(s => s !== 'Unassigned'));
         } catch (err: any) {
             if (err.name === 'AbortError') return;
             console.error('FetchData Error:', err);
@@ -149,23 +158,39 @@ function AdminDashboardContent() {
         }
     };
 
-    const updatePlayerSlot = async (playerId: string, category: string) => {
-        let finalCategory = category;
-        if (category === '+ New Slot') {
-            const name = prompt('Enter new slot name:');
-            if (!name) return;
-            finalCategory = name;
-        }
+    const updatePlayerSlot = async (player: any, category: string) => {
         try {
             const res = await fetch('/api/players/manage', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'update', player: { id: playerId, category: finalCategory } })
+                body: JSON.stringify({ action: 'update', player: { id: player.id, category } })
             });
-            if (res.ok) fetchData();
+            if (res.ok) {
+                // Also update in registrations to keep in sync
+                const firstName = player.first_name;
+                const lastName = player.last_name;
+                
+                await supabase.from('registrations')
+                    .update({ slot: category })
+                    .ilike('name', `%${firstName}%`)
+                    .ilike('name', `%${lastName}%`);
+
+                fetchData();
+            }
         } catch (err) {
             alert('Error updating slot');
         }
+    };
+
+    const confirmNewSlot = async (player: any) => {
+        const val = newSlotInput.trim();
+        if (!val) {
+            setEditingSlotId(null);
+            return;
+        }
+        await updatePlayerSlot(player, val);
+        setEditingSlotId(null);
+        setNewSlotInput('');
     };
 
     const deleteSlot = async (slotName: string) => {
@@ -260,6 +285,26 @@ function AdminDashboardContent() {
 
 
 
+    const bulkDeleteAll = async () => {
+        if (!confirm('🚨 EMERGENCY RESET: This will remove ALL players from the auction pool, clear ALL sold players, and return everyone to Registration Control. Are you absolutely sure?')) return;
+
+        setSyncing(true);
+        try {
+            const res = await fetch('/api/admin/bulk-delete-all', { method: 'DELETE' });
+            const data = await res.json();
+            if (data.success) {
+                alert('✅ All players returned to registration control successfully!');
+                fetchData();
+            } else {
+                throw new Error(data.error || 'Bulk delete failed');
+            }
+        } catch (err: any) {
+            alert('Error: ' + err.message);
+        } finally {
+            setSyncing(false);
+        }
+    };
+
     const currentPlayer = players.find(p => p.id === auctionState?.current_player_id);
 
     if (loading) return <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000', color: '#fff' }}>LOADING CONSOLE...</div>;
@@ -290,7 +335,7 @@ function AdminDashboardContent() {
                         </div>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px', marginBottom: '40px' }}>
+                    <div style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', display: 'grid', gap: '20px', marginBottom: '40px' }}>
 
 
                         {/* Registration Control Box */}
@@ -390,46 +435,15 @@ function AdminDashboardContent() {
                                         <h2 style={{ fontSize: '1.2rem', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '10px' }}>
                                             <LayoutGrid size={20} color="#38bdf8" /> CONFIGURE AUCTION SLOTS
                                         </h2>
-                                        <div style={{ display: 'flex', gap: '10px' }}>
-                                            <input
-                                                type="text"
-                                                placeholder="New Slot Name..."
-                                                value={newSlotName}
-                                                onChange={(e) => setNewSlotName(e.target.value)}
-                                                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '8px 15px', borderRadius: '8px', color: '#fff', fontSize: '0.8rem' }}
-                                            />
-                                            <button
-                                                onClick={async () => {
-                                                    if (!confirm('Are you sure? This will set all team budgets to 5000.')) return;
-                                                    const res = await fetch('/api/admin/reset-budgets', { method: 'POST' });
-                                                    if (res.ok) {
-                                                        alert('All budgets have been reset to 5000.');
-                                                        fetchData();
-                                                    }
-                                                }}
-                                                className="btn-secondary"
-                                                style={{ fontSize: '0.7rem', padding: '0 15px', color: '#ff4b4b', border: '1px solid rgba(255, 75, 75, 0.3)' }}
-                                            >RESET BUDGETS (5000)</button>
-                                            <button
-                                                onClick={() => {
-                                                    if (!newSlotName) return;
-                                                    setNewSlotName('');
-                                                    alert(`To add slot "${newSlotName}", assign a player to it using the pool table actions below.`);
-                                                }}
-                                                className="btn-secondary"
-                                                style={{ fontSize: '0.7rem', padding: '0 15px' }}
-                                            >+ CREATE SLOT</button>
-                                        </div>
                                     </div>
 
                                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                                         {['All', ...Array.from(new Set(players.map(p => p.category || 'Unassigned')))].map(slot => (
-                                            <div key={slot} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                                            <div key={slot} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                 <button
                                                     onClick={() => setSelectedSlot(slot)}
                                                     style={{
                                                         padding: '10px 20px',
-                                                        paddingRight: (slot !== 'All' && slot !== 'Unassigned') ? '45px' : '20px',
                                                         borderRadius: '12px',
                                                         fontSize: '0.8rem',
                                                         fontWeight: 800,
@@ -445,53 +459,52 @@ function AdminDashboardContent() {
                                                         ({players.filter(p => (slot === 'All' || p.category === slot) && p.auction_status === 'pending').length})
                                                     </span>
                                                 </button>
+                                                
                                                 {slot !== 'All' && slot !== 'Unassigned' && (
-                                                    <button
-                                                        onClick={() => {
-                                                            // Redirect to slot management with this category pre-selected
-                                                            router.push(`/admin/card-slots?import=${slot}`);
-                                                        }}
-                                                        style={{
-                                                            padding: '10px 15px',
-                                                            borderRadius: '12px',
-                                                            fontSize: '0.7rem',
-                                                            fontWeight: 950,
-                                                            background: 'rgba(255,215,0,0.1)',
-                                                            color: 'var(--primary)',
-                                                            border: '1px solid var(--primary)',
-                                                            marginLeft: '8px',
-                                                            cursor: 'pointer',
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            gap: '5px'
-                                                        }}
-                                                    >
-                                                        🃏 CARD AUCTION
-                                                    </button>
-                                                )}
-                                                {slot !== 'All' && slot !== 'Unassigned' && (
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            deleteSlot(slot);
-                                                        }}
-                                                        style={{
-                                                            position: 'absolute',
-                                                            right: '10px',
-                                                            background: 'rgba(255, 75, 75, 0.1)',
-                                                            border: 'none',
-                                                            width: '24px',
-                                                            height: '24px',
-                                                            borderRadius: '6px',
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            justifyContent: 'center',
-                                                            color: '#ff4b4b',
-                                                            cursor: 'pointer'
-                                                        }}
-                                                    >
-                                                        <Trash2 size={12} />
-                                                    </button>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                        <button
+                                                            onClick={() => router.push(`/admin/card-slots?import=${slot}`)}
+                                                            style={{
+                                                                padding: '10px 18px',
+                                                                borderRadius: '12px',
+                                                                fontSize: '0.7rem',
+                                                                fontWeight: 950,
+                                                                background: 'rgba(255,215,0,0.05)',
+                                                                color: 'var(--primary)',
+                                                                border: '1px solid var(--primary)',
+                                                                cursor: 'pointer',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                gap: '6px',
+                                                                whiteSpace: 'nowrap',
+                                                                transition: 'all 0.2s'
+                                                            }}
+                                                            onMouseOver={(e) => { (e.currentTarget as any).style.background = 'rgba(255,215,0,0.15)'; }}
+                                                            onMouseOut={(e) => { (e.currentTarget as any).style.background = 'rgba(255,215,0,0.05)'; }}
+                                                        >
+                                                            🃏 CARD AUCTION
+                                                        </button>
+                                                        
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); deleteSlot(slot); }}
+                                                            style={{
+                                                                background: 'rgba(255, 75, 75, 0.1)',
+                                                                border: '1px solid rgba(255, 75, 75, 0.2)',
+                                                                padding: '10px',
+                                                                borderRadius: '10px',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                color: '#ff4b4b',
+                                                                cursor: 'pointer',
+                                                                transition: 'all 0.2s'
+                                                            }}
+                                                            onMouseOver={(e) => { (e.currentTarget as any).style.background = 'rgba(255, 75, 75, 0.2)'; }}
+                                                            onMouseOut={(e) => { (e.currentTarget as any).style.background = 'rgba(255, 75, 75, 0.1)'; }}
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    </div>
                                                 )}
                                             </div>
                                         ))}
@@ -514,6 +527,22 @@ function AdminDashboardContent() {
                                             ACTIVE SLOT: {selectedSlot}
                                         </div>
                                     )}
+                                    <button 
+                                        onClick={bulkDeleteAll} 
+                                        className="btn-secondary" 
+                                        style={{ 
+                                            fontSize: '0.7rem', 
+                                            padding: '8px 15px', 
+                                            color: '#ff4b4b', 
+                                            borderColor: 'rgba(255, 75, 75, 0.3)', 
+                                            display: 'flex', 
+                                            alignItems: 'center', 
+                                            gap: '6px',
+                                            background: 'rgba(255, 75, 75, 0.05)'
+                                        }}
+                                    >
+                                        <Trash2 size={14} /> DELETE ALL
+                                    </button>
                                 </div>
                             </div>
                             <div className="scrollable-table" style={{ maxHeight: 'calc(100vh - 250px)', overflowY: 'auto', overflowX: 'auto' }}>
@@ -538,68 +567,130 @@ function AdminDashboardContent() {
                                                     <div style={{ fontSize: '0.75rem', marginTop: '5px' }}>Push some players from Registration Control.</div>
                                                 </td>
                                             </tr>
-                                        ) : players.map((p) => (
-                                            <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }} className="table-row-hover">
-                                                <td style={tdStyle}>
-                                                    <div className="admin-photo-container" style={{ width: '46px', height: '46px', borderRadius: '12px', background: '#222', overflow: 'hidden', margin: '0 auto', border: '1px solid rgba(255,255,255,0.1)', position: 'relative' }}>
-                                                        <img
-                                                            src={fixPhotoUrl(p.photo_url || p.photo, p.first_name)}
-                                                            className="admin-photo"
-                                                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                                            alt=""
-                                                            onError={(e) => {
-                                                                (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.first_name}`;
-                                                            }}
-                                                        />
-                                                    </div>
-                                                </td>
-                                                <td style={{ ...tdStyle, textAlign: 'left' }}>
-                                                    <div style={{ fontWeight: 800, color: '#fff', fontSize: '1.2rem' }}>{p.first_name} {p.last_name}</div>
-                                                </td>
-                                                <td style={tdStyle}>
-                                                    <div style={{ fontWeight: 900, fontSize: '1.1rem', color: '#fff' }}>{p.cricket_skill || p.role}</div>
-                                                </td>
-                                                <td style={tdStyle}>
-                                                    <div style={{ fontWeight: 900, color: (p.was_present_kc3 === 'હા' || p.was_present_kc3 === 'Yes') ? '#00ff80' : '#ff4b4b' }}>
-                                                        {(p.was_present_kc3 === 'હા' || p.was_present_kc3 === 'Yes') ? 'YES' : 'NO'}
-                                                    </div>
-                                                </td>
-                                                <td style={tdStyle}>
-                                                    <div style={{ fontWeight: 800, color: 'var(--primary)' }}>{p.category || 'Unassigned'}</div>
-                                                </td>
-                                                <td style={tdStyle}>
-                                                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center' }}>
-                                                        {p.auction_status === 'sold' && (
-                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center', justifyContent: 'center' }}>
-                                                                <div style={{ background: 'rgba(0, 255, 128, 0.1)', color: '#00ff80', padding: '6px 12px', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 950 }}>SOLD</div>
-                                                                <div style={{ fontSize: '0.65rem', color: '#888', fontWeight: 800 }}>{teams.find(t => t.id === p.team_id || t.id === p.sold_to_team_id)?.name || 'ASSIGNED'}</div>
+                                        ) : (() => {
+                                            const filteredPlayers = players.filter(p => selectedSlot === 'All' || p.category === selectedSlot);
+                                            if (filteredPlayers.length === 0) {
+                                                return (
+                                                    <tr>
+                                                        <td colSpan={7} style={{ padding: '50px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                                            <Users size={32} style={{ opacity: 0.2, marginBottom: '10px' }} />
+                                                            <div style={{ fontWeight: 700 }}>NO PLAYERS IN {selectedSlot.toUpperCase()}</div>
+                                                            <div style={{ fontSize: '0.75rem', marginTop: '5px' }}>Try selecting a different slot or assign players to this one.</div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            }
+                                            return filteredPlayers.map((p) => (
+                                                <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }} className="table-row-hover">
+                                                    <td style={tdStyle}>
+                                                        <div className="admin-photo-container" style={{ width: '46px', height: '46px', borderRadius: '12px', background: '#222', overflow: 'hidden', margin: '0 auto', border: '1px solid rgba(255,255,255,0.1)', position: 'relative' }}>
+                                                            <img
+                                                                src={fixPhotoUrl(p.photo_url || p.photo, p.first_name)}
+                                                                className="admin-photo"
+                                                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                                alt=""
+                                                                onError={(e) => {
+                                                                    (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.first_name}`;
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ ...tdStyle, textAlign: 'left' }}>
+                                                        <div style={{ fontWeight: 800, color: '#fff', fontSize: '1.2rem' }}>{p.first_name} {p.last_name}</div>
+                                                    </td>
+                                                    <td style={tdStyle}>
+                                                        <div style={{ fontWeight: 900, fontSize: '1.1rem', color: '#fff' }}>{p.cricket_skill || p.role}</div>
+                                                    </td>
+                                                    <td style={tdStyle}>
+                                                        <div style={{ fontWeight: 900, color: (p.was_present_kc3 === 'હા' || p.was_present_kc3 === 'Yes') ? '#00ff80' : '#ff4b4b' }}>
+                                                            {(p.was_present_kc3 === 'હા' || p.was_present_kc3 === 'Yes') ? 'YES' : 'NO'}
+                                                        </div>
+                                                    </td>
+                                                    <td style={tdStyle}>
+                                                        {editingSlotId === p.id ? (
+                                                            <div style={{ display: 'flex', gap: '5px', width: '90%', margin: '0 auto' }}>
+                                                                <input
+                                                                    type="text"
+                                                                    value={newSlotInput}
+                                                                    onChange={(e) => setNewSlotInput(e.target.value)}
+                                                                    autoFocus
+                                                                    placeholder="Name..."
+                                                                    onKeyDown={(e) => e.key === 'Enter' && confirmNewSlot(p)}
+                                                                    style={{
+                                                                        background: '#0a0a0a', border: '1px solid var(--primary)',
+                                                                        color: '#fff', fontSize: '0.7rem', padding: '5px',
+                                                                        borderRadius: '4px', width: '65%', outline: 'none'
+                                                                    }}
+                                                                />
+                                                                <button
+                                                                    onClick={() => confirmNewSlot(p)}
+                                                                    style={{ background: 'var(--primary)', color: '#000', border: 'none', borderRadius: '4px', fontSize: '0.6rem', padding: '0 6px', fontWeight: 900, cursor: 'pointer' }}
+                                                                >
+                                                                    OK
+                                                                </button>
                                                             </div>
+                                                        ) : (
+                                                            <select
+                                                                value={p.category || 'Unassigned'}
+                                                                onChange={(e) => {
+                                                                    if (e.target.value === '+ New Slot') {
+                                                                        setEditingSlotId(p.id);
+                                                                        setNewSlotInput('');
+                                                                    } else {
+                                                                        updatePlayerSlot(p, e.target.value);
+                                                                    }
+                                                                }}
+                                                                style={{
+                                                                    background: '#0a0a0a', border: '1px solid rgba(255,255,255,0.2)',
+                                                                    color: '#fff', fontSize: '0.75rem', padding: '6px',
+                                                                    borderRadius: '6px', width: '100%', fontWeight: 700,
+                                                                    outline: 'none', cursor: 'pointer'
+                                                                }}
+                                                            >
+                                                                <option value="Unassigned" style={{ background: '#0a0a0a', color: '#fff' }}>Unassigned</option>
+                                                                {allSlots.map(slotName => (
+                                                                    <option key={slotName} value={slotName} style={{ background: '#0a0a0a', color: '#fff' }}>
+                                                                        {slotName.toUpperCase()}
+                                                                    </option>
+                                                                ))}
+                                                                <option value="+ New Slot" style={{ background: '#0a0a0a', color: 'var(--primary)', fontWeight: 800 }}>+ NEW SLOT</option>
+                                                            </select>
                                                         )}
-                                                        {p.auction_status === 'active' && (
-                                                            <div style={{ background: 'rgba(255, 215, 0, 0.1)', color: 'var(--primary)', padding: '6px 12px', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 950, border: '1px solid var(--primary)' }}>LIVE</div>
-                                                        )}
-                                                        {p.auction_status === 'unsold' && (
-                                                            <div style={{ background: 'rgba(255, 75, 75, 0.1)', color: '#ff4b4b', padding: '6px 12px', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 950 }}>UNSOLD</div>
-                                                        )}
-                                                        {p.auction_status === 'pending' && (
-                                                            <div style={{ padding: '8px 16px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', color: '#444', fontWeight: 900, fontSize: '0.65rem', border: '1px solid rgba(255,255,255,0.1)', cursor: 'not-allowed', textTransform: 'uppercase' }}>
-                                                                CARD SYSTEM ACTIVE
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                                <td style={tdStyle}>
-                                                    <button onClick={async () => {
-                                                        if (confirm('Delete player?')) {
-                                                            const res = await fetch(`/api/admin/delete-player?id=${p.id}`, { method: 'DELETE' });
-                                                            if (res.ok) fetchData();
-                                                        }
-                                                    }} style={{ color: '#ff4b4b', opacity: 0.5, background: 'none', border: 'none', cursor: 'pointer' }}>
-                                                        <Trash2 size={16} />
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
+                                                    </td>
+                                                    <td style={tdStyle}>
+                                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center' }}>
+                                                            {p.auction_status === 'sold' && (
+                                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center', justifyContent: 'center' }}>
+                                                                    <div style={{ background: 'rgba(0, 255, 128, 0.1)', color: '#00ff80', padding: '6px 12px', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 950 }}>SOLD</div>
+                                                                    <div style={{ fontSize: '0.65rem', color: '#888', fontWeight: 800 }}>{teams.find(t => t.id === p.team_id || t.id === p.sold_to_team_id)?.name || 'ASSIGNED'}</div>
+                                                                </div>
+                                                            )}
+                                                            {p.auction_status === 'active' && (
+                                                                <div style={{ background: 'rgba(255, 215, 0, 0.1)', color: 'var(--primary)', padding: '6px 12px', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 950, border: '1px solid var(--primary)' }}>LIVE</div>
+                                                            )}
+                                                            {p.auction_status === 'unsold' && (
+                                                                <div style={{ background: 'rgba(255, 75, 75, 0.1)', color: '#ff4b4b', padding: '6px 12px', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 950 }}>UNSOLD</div>
+                                                            )}
+                                                            {p.auction_status === 'pending' && (
+                                                                <div style={{ padding: '8px 16px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', color: '#444', fontWeight: 900, fontSize: '0.65rem', border: '1px solid rgba(255,255,255,0.1)', cursor: 'not-allowed', textTransform: 'uppercase' }}>
+                                                                    CARD SYSTEM ACTIVE
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    <td style={tdStyle}>
+                                                        <button onClick={async () => {
+                                                            if (confirm('Delete player?')) {
+                                                                const res = await fetch(`/api/admin/delete-player?id=${p.id}`, { method: 'DELETE' });
+                                                                if (res.ok) fetchData();
+                                                            }
+                                                        }} style={{ color: '#ff4b4b', opacity: 0.5, background: 'none', border: 'none', cursor: 'pointer' }}>
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ));
+                                        })()}
                                     </tbody>
                                 </table>
                             </div>

@@ -23,13 +23,15 @@ function PlayerPoolContent() {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [syncingId, setSyncingId] = useState<string | null>(null);
+    const [allSlots, setAllSlots] = useState<string[]>([]);
     const router = useRouter();
 
     const fetchPlayers = async () => {
         setLoading(true);
-        const [playersRes, teamsRes] = await Promise.all([
+        const [playersRes, teamsRes, regsRes] = await Promise.all([
             supabase.from('players').select('*').order('created_at', { ascending: false }),
-            supabase.from('teams').select('*').order('name')
+            supabase.from('teams').select('*').order('name'),
+            supabase.from('registrations').select('slot')
         ]);
         
         if (playersRes.error) {
@@ -41,6 +43,13 @@ function PlayerPoolContent() {
         if (teamsRes.data) {
             setTeams(teamsRes.data);
         }
+
+        // Combine unique slots from both tables
+        const playerCats = playersRes.data?.map(p => p.category).filter(Boolean) || [];
+        const regSlots = regsRes.data?.map(r => r.slot).filter(Boolean) || [];
+        const merged = Array.from(new Set([...playerCats, ...regSlots, 'Unassigned'])).sort();
+        setAllSlots(merged.filter(s => s !== 'Unassigned'));
+
         setLoading(false);
     };
 
@@ -122,6 +131,41 @@ function PlayerPoolContent() {
         };
     }, []);
 
+    const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
+    const [newSlotInput, setNewSlotInput] = useState('');
+
+    const updatePlayerCategory = async (player: any, newCat: string) => {
+        const { error } = await supabase.from('players').update({ category: newCat }).eq('id', player.id);
+        if (error) {
+            alert('Failed to update slot: ' + error.message);
+        } else {
+            // Also update in registrations to keep in sync
+            const firstName = player.first_name;
+            const lastName = player.last_name;
+            
+            // Try to find the registration by name
+            await supabase.from('registrations')
+                .update({ slot: newCat })
+                .ilike('name', `%${firstName}%`)
+                .ilike('name', `%${lastName}%`);
+
+            setPlayers(prev => prev.map(p => p.id === player.id ? { ...p, category: newCat } : p));
+        }
+    };
+
+    const confirmNewSlot = async (player: any) => {
+        const val = newSlotInput.trim();
+        if (!val) {
+            setEditingSlotId(null);
+            return;
+        }
+        await updatePlayerCategory(player, val);
+        setEditingSlotId(null);
+        setNewSlotInput('');
+        fetchPlayers(); // Refresh list to get new slot in dropdown
+    };
+
+
     const filtered = players.filter(p => 
         `${p.first_name} ${p.last_name}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
         p.role?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -186,7 +230,7 @@ function PlayerPoolContent() {
                                 <th style={{ ...thStyle, width: '150px' }}>FULL NAME</th>
                                 <th style={{ ...thStyle, width: '110px' }}>CRICKET SKILL</th>
                                 <th style={{ ...thStyle, width: '100px' }}>KESHAV CUP PARTICIPATION</th>
-                                <th style={{ ...thStyle, width: '120px' }}>SLOTS</th>
+                                <th style={{ ...thStyle, width: '130px' }}>SLOTS</th>
                                 <th style={{ ...thStyle, width: '140px' }}>AUCTION</th>
                                 <th style={{ ...thStyle, width: '60px' }}>DELETE</th>
                             </tr>
@@ -230,9 +274,55 @@ function PlayerPoolContent() {
                                             </div>
                                         </td>
                                         <td style={tdStyle}>
-                                            <div style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--primary)' }}>
-                                                {p.category || 'Unassigned'}
-                                            </div>
+                                            {editingSlotId === p.id ? (
+                                                <div style={{ display: 'flex', gap: '5px', width: '90%', margin: '0 auto' }}>
+                                                    <input
+                                                        type="text"
+                                                        value={newSlotInput}
+                                                        onChange={(e) => setNewSlotInput(e.target.value)}
+                                                        autoFocus
+                                                        placeholder="Name..."
+                                                        onKeyDown={(e) => e.key === 'Enter' && confirmNewSlot(p)}
+                                                        style={{
+                                                            background: '#0a0a0a', border: '1px solid var(--primary)',
+                                                            color: '#fff', fontSize: '0.7rem', padding: '5px',
+                                                            borderRadius: '4px', width: '65%', outline: 'none'
+                                                        }}
+                                                    />
+                                                    <button
+                                                        onClick={() => confirmNewSlot(p)}
+                                                        style={{ background: 'var(--primary)', color: '#000', border: 'none', borderRadius: '4px', fontSize: '0.6rem', padding: '0 6px', fontWeight: 900, cursor: 'pointer' }}
+                                                    >
+                                                        OK
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <select
+                                                    value={p.category || 'Unassigned'}
+                                                    onChange={(e) => {
+                                                        if (e.target.value === '+ New Slot') {
+                                                            setEditingSlotId(p.id);
+                                                            setNewSlotInput('');
+                                                        } else {
+                                                            updatePlayerCategory(p, e.target.value);
+                                                        }
+                                                    }}
+                                                    style={{
+                                                        background: '#0a0a0a', border: '1px solid rgba(255,255,255,0.2)',
+                                                        color: '#fff', fontSize: '0.7rem', padding: '5px',
+                                                        borderRadius: '6px', width: '90%', fontWeight: 700,
+                                                        outline: 'none', cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    <option value="Unassigned" style={{ background: '#0a0a0a', color: '#fff' }}>Unassigned</option>
+                                                    {allSlots.map(slotName => (
+                                                        <option key={slotName} value={slotName} style={{ background: '#0a0a0a', color: '#fff' }}>
+                                                            {slotName}
+                                                        </option>
+                                                    ))}
+                                                    <option value="+ New Slot" style={{ background: '#0a0a0a', color: 'var(--primary)', fontWeight: 800 }}>+ New Slot</option>
+                                                </select>
+                                            )}
                                         </td>
                                         <td style={tdStyle}>
                                             {p.auction_status === 'sold' ? (

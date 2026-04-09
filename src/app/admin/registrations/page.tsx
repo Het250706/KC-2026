@@ -25,6 +25,7 @@ function RegistrationControlContent() {
     const [hidePushed, setHidePushed] = useState(true);
     const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
     const [newSlotInput, setNewSlotInput] = useState('');
+    const [allSlots, setAllSlots] = useState<string[]>([]);
 
     // Photo Management State
     const [selectedPlayer, setSelectedPlayer] = useState<any>(null);
@@ -35,15 +36,21 @@ function RegistrationControlContent() {
 
     const fetchRegistrations = async () => {
         setLoading(true);
-        const { data, error } = await supabase
-            .from('registrations')
-            .select('*')
-            .order('created_at', { ascending: true });
+        const [regsRes, playersRes] = await Promise.all([
+            supabase.from('registrations').select('*').order('created_at', { ascending: true }),
+            supabase.from('players').select('category')
+        ]);
 
-        if (error) {
-            console.error('Error fetching registrations:', error);
+        if (regsRes.error) {
+            console.error('Error fetching registrations:', regsRes.error);
         } else {
-            setRegistrations(data || []);
+            setRegistrations(regsRes.data || []);
+            
+            // Combine unique slots/categories from both tables
+            const regSlots = regsRes.data?.map(r => r.slot).filter(Boolean) || [];
+            const playerCats = playersRes.data?.map(p => p.category).filter(Boolean) || [];
+            const merged = Array.from(new Set([...regSlots, ...playerCats, 'Unassigned'])).sort();
+            setAllSlots(merged.filter(s => s !== 'Unassigned'));
         }
         setLoading(false);
     };
@@ -188,24 +195,37 @@ function RegistrationControlContent() {
         }
     };
 
-    const updateRegistrationSlot = async (id: string, newSlot: string) => {
-        const { error } = await supabase.from('registrations').update({ slot: newSlot }).eq('id', id);
+    const updateRegistrationSlot = async (player: any, newSlot: string) => {
+        const { error } = await supabase.from('registrations').update({ slot: newSlot }).eq('id', player.id);
         if (error) {
             alert('Failed to update slot: ' + error.message);
         } else {
-            setRegistrations(prev => prev.map(p => p.id === id ? { ...p, slot: newSlot } : p));
+            // Also update in players table if pushed
+            if (player.is_pushed) {
+                const nameParts = player.name?.split(' ') || ['Unknown', 'Player'];
+                const firstName = nameParts[0];
+                const lastName = nameParts.slice(1).join(' ') || 'Player';
+
+                await supabase.from('players')
+                    .update({ category: newSlot })
+                    .eq('first_name', firstName)
+                    .eq('last_name', lastName);
+            }
+
+            setRegistrations(prev => prev.map(p => p.id === player.id ? { ...p, slot: newSlot } : p));
         }
     };
 
-    const confirmNewSlot = async (id: string) => {
+    const confirmNewSlot = async (player: any) => {
         const val = newSlotInput.trim();
         if (!val) {
             setEditingSlotId(null);
             return;
         }
-        await updateRegistrationSlot(id, val);
+        await updateRegistrationSlot(player, val);
         setEditingSlotId(null);
         setNewSlotInput('');
+        fetchRegistrations(); // Refresh to update dropdown options
     };
 
     const deleteRegistration = async (id: string) => {
@@ -278,7 +298,6 @@ function RegistrationControlContent() {
     });
 
     // Extract unique existing slots from ALL registrations (not just filtered)
-    const existingSlots = Array.from(new Set(registrations.map(r => r.slot).filter(s => s && s !== 'Unassigned'))).sort();
 
     return (
         <main style={{ minHeight: '100vh', background: '#000', color: '#fff' }}>
@@ -445,7 +464,7 @@ function RegistrationControlContent() {
                                                         onChange={(e) => setNewSlotInput(e.target.value)}
                                                         autoFocus
                                                         placeholder="Name..."
-                                                        onKeyDown={(e) => e.key === 'Enter' && confirmNewSlot(p.id)}
+                                                        onKeyDown={(e) => e.key === 'Enter' && confirmNewSlot(p)}
                                                         style={{
                                                             background: '#0a0a0a', border: '1px solid var(--primary)',
                                                             color: '#fff', fontSize: '0.7rem', padding: '5px',
@@ -453,7 +472,7 @@ function RegistrationControlContent() {
                                                         }}
                                                     />
                                                     <button
-                                                        onClick={() => confirmNewSlot(p.id)}
+                                                        onClick={() => confirmNewSlot(p)}
                                                         style={{ background: 'var(--primary)', color: '#000', border: 'none', borderRadius: '4px', fontSize: '0.6rem', padding: '0 6px', fontWeight: 900, cursor: 'pointer' }}
                                                     >
                                                         OK
@@ -467,7 +486,7 @@ function RegistrationControlContent() {
                                                             setEditingSlotId(p.id);
                                                             setNewSlotInput('');
                                                         } else {
-                                                            updateRegistrationSlot(p.id, e.target.value);
+                                                            updateRegistrationSlot(p, e.target.value);
                                                         }
                                                     }}
                                                     style={{
@@ -478,7 +497,7 @@ function RegistrationControlContent() {
                                                     }}
                                                 >
                                                     <option value="Unassigned" style={{ background: '#0a0a0a', color: '#fff' }}>Unassigned</option>
-                                                    {existingSlots.map(slotName => (
+                                                    {allSlots.map(slotName => (
                                                         <option key={slotName} value={slotName} style={{ background: '#0a0a0a', color: '#fff' }}>
                                                             {slotName}
                                                         </option>

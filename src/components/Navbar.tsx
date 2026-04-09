@@ -78,12 +78,6 @@ export default function Navbar() {
 
     const AdminLinks = () => (
         <>
-            <button 
-                onClick={handleLogout}
-                style={{ ...getNavLinkStyle('/'), background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-            >
-                <Home size={18} /> <span>Home</span>
-            </button>
             <Link href="/admin/dashboard" style={getNavLinkStyle('/admin/dashboard')} onClick={() => setIsMenuOpen(false)}>
                 <Shield size={18} /> <span>Admin Panel</span>
             </Link>
@@ -95,15 +89,15 @@ export default function Navbar() {
                     <HistoryIcon size={18} /> <span>History</span>
                 </Link>
             </div>
-            <div style={{ padding: '5px 12px', background: 'rgba(255,215,0,0.1)', borderRadius: '10px', fontSize: '0.65rem', fontWeight: 950, color: 'var(--primary)', letterSpacing: '1px' }}>CARD SYSTEM</div>
-            <Link href="/admin/card-control" style={getNavLinkStyle('/admin/card-control')} onClick={() => setIsMenuOpen(false)}>
-                <Activity size={18} /> <span>Card Control</span>
-            </Link>
+
             <Link href="/admin/card-slots" style={getNavLinkStyle('/admin/card-slots')} onClick={() => setIsMenuOpen(false)}>
                 <LayoutGrid size={18} /> <span>Slots</span>
             </Link>
             <Link href="/admin/card-turns" style={getNavLinkStyle('/admin/card-turns')} onClick={() => setIsMenuOpen(false)}>
                 <Shuffle size={18} /> <span>Turns</span>
+            </Link>
+            <Link href="/admin/card-control" style={getNavLinkStyle('/admin/card-control')} onClick={() => setIsMenuOpen(false)}>
+                <Activity size={18} /> <span>Card Control</span>
             </Link>
             <div className="mobile-only">
                 <Link href="/auction/live-cards" style={getNavLinkStyle('/auction/live-cards')} onClick={() => setIsMenuOpen(false)}>
@@ -115,12 +109,6 @@ export default function Navbar() {
 
     const CaptainLinks = () => (
         <>
-            <button 
-                onClick={handleLogout}
-                style={{ ...getNavLinkStyle('/'), background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-            >
-                <Home size={18} /> <span>Home</span>
-            </button>
             <Link href="/captain/dashboard" style={getNavLinkStyle('/captain/dashboard')} onClick={() => setIsMenuOpen(false)}>
                 <LayoutDashboard size={18} /> <span>Dashboard</span>
             </Link>

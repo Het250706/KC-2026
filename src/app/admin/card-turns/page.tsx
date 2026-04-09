@@ -6,6 +6,7 @@ import Navbar from '@/components/Navbar';
 import RoleGuard from '@/components/RoleGuard';
 import { CardSlot, CardAuctionTurn } from '@/types/card-auction';
 import { Shuffle, Settings, GripVertical, Save, Loader2, Sparkles } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { 
     DndContext, 
     closestCenter,
@@ -70,6 +71,7 @@ function SortableItem({ id, teamName }: { id: string, teamName: string }) {
 }
 
 function TurnManagementContent() {
+    const router = useRouter();
     const [slots, setSlots] = useState<CardSlot[]>([]);
     const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
     const [teams, setTeams] = useState<any[]>([]);
@@ -93,7 +95,15 @@ function TurnManagementContent() {
             ]);
             if (slotsRes.data) {
                 setSlots(slotsRes.data);
-                if (slotsRes.data.length > 0) setSelectedSlotId(slotsRes.data[0].id);
+                
+                // --- NEW DEEP LINK LOGIC ---
+                const urlParams = new URLSearchParams(window.location.search);
+                const slotIdParam = urlParams.get('slotId');
+                if (slotIdParam && slotsRes.data.some(s => s.id === slotIdParam)) {
+                    setSelectedSlotId(slotIdParam);
+                } else if (slotsRes.data.length > 0) {
+                    setSelectedSlotId(slotsRes.data[0].id);
+                }
             }
             if (teamsRes.data) setTeams(teamsRes.data);
         } finally {
@@ -116,7 +126,9 @@ function TurnManagementContent() {
     };
 
     useEffect(() => {
-        if (selectedSlotId && teams.length > 0) fetchTurns(selectedSlotId);
+        if (selectedSlotId && teams.length > 0) {
+            fetchTurns(selectedSlotId);
+        }
     }, [selectedSlotId, teams]);
 
     const handleDragEnd = (event: DragEndEvent) => {
@@ -150,7 +162,7 @@ function TurnManagementContent() {
 
             const { error } = await supabase.from('card_auction_turns').insert(turnsInsert);
             if (error) throw error;
-            alert('Turn order saved successfully!');
+            router.push(`/admin/card-control?slotId=${selectedSlotId}`);
         } catch (err: any) {
             alert(err.message);
         } finally {
@@ -178,7 +190,7 @@ function TurnManagementContent() {
                     >
                         {slots.map(s => (
                             <option key={s.id} value={s.id}>
-                                { (s as any).slot_players?.[0]?.player?.category?.toUpperCase() || `SLOT ${s.slot_number}` }
+                                { (s as any).slot_players?.[0]?.player?.category ? (s as any).slot_players[0].player.category.toUpperCase() : `SLOT ${s.slot_number}` } ({ (s as any).status || 'PENDING' })
                             </option>
                         ))}
                     </select>
