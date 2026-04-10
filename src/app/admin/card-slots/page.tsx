@@ -54,8 +54,9 @@ function SlotManagementContent() {
                 const categoryCounts: Record<string, number> = {};
 
                 slotsData.forEach(s => {
-                    const firstPlayer = s.slot_players?.[0]?.player;
-                    const cat = firstPlayer?.category || 'Unassigned';
+                    // Find the first player in the slot that actually has a category assigned
+                    const playerWithCat = s.slot_players?.find((sp: any) => sp.player?.category && sp.player.category !== 'Unassigned');
+                    const cat = playerWithCat?.player?.category || 'Unassigned';
                     categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
                     
                     const playersInSlot = s.slot_players?.map((sp: any) => sp.player) || [];
@@ -64,12 +65,13 @@ function SlotManagementContent() {
                     processedSlots.push({
                         id: s.id,
                         category: cat,
-                        displayName: categoryCounts[cat] > 1 ? `${cat} - PART ${categoryCounts[cat]}` : cat,
+                        displayName: cat === 'Unassigned' ? `SLOT ${s.slot_number}` : (categoryCounts[cat] > 1 ? `${cat} - PART ${categoryCounts[cat]}` : cat),
                         status: s.status,
                         is_new: false,
                         player_count: playersInSlot.length,
                         players: playersInSlot,
-                        created_at: s.created_at
+                        created_at: s.created_at,
+                        slot_number: s.slot_number
                     });
                 });
             }
@@ -82,7 +84,7 @@ function SlotManagementContent() {
                     processedSlots.push({
                         id: `new-${cat}`,
                         category: cat,
-                        displayName: cat,
+                        displayName: cat === 'Unassigned' ? 'PENDING POOL' : cat,
                         status: 'uninitialized',
                         is_new: true,
                         player_count: pendingPlayersForCat.length,
@@ -211,7 +213,7 @@ function SlotManagementContent() {
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '25px' }}>
-                    {slots.map(slot => (
+                    {slots.map((slot, index) => (
                         <div key={slot.id} className="glass" style={{ padding: '0', borderRadius: '30px', border: '1px solid rgba(255,255,255,0.05)', overflow: 'hidden' }}>
                             <div style={{ padding: '30px' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -223,16 +225,22 @@ function SlotManagementContent() {
                                             <ChevronDown size={22} color="var(--primary)" />
                                         </div>
                                         <div style={{ fontSize: '1.2rem', fontWeight: 950 }}>
-                                            { slot.displayName.toUpperCase() }
+                                            { slot.category === 'Unassigned' ? `SLOT ${index + 1}` : slot.displayName.toUpperCase() }
                                         </div>
                                     </div>
                                     <div style={{ padding: '6px 12px', borderRadius: '50px', background: slot.status === 'completed' ? 'rgba(0,255,128,0.1)' : slot.is_new ? 'rgba(56, 189, 248, 0.1)' : 'rgba(255,215,0,0.1)', color: slot.status === 'completed' ? '#00ff80' : slot.is_new ? '#38bdf8' : 'var(--primary)', fontWeight: 900, fontSize: '0.7rem' }}>
-                                        {slot.is_new ? 'READY' : slot.status.toUpperCase()}
+                                        {slot.status === 'completed' ? 'COMPLETED' : slot.is_new ? 'READY' : slot.status.toUpperCase()}
                                     </div>
                                 </div>
                                 
                                 <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '20px' }}>
-                                    {slot.is_new ? `${slot.player_count} PLAYERS DETECTED` : `${slot.player_count} PLAYERS CONFIGURED`}
+                                    {slot.status === 'completed' ? (
+                                        <span style={{ color: '#00ff80', letterSpacing: '2px' }}>ALL PLAYERS COMPLETED</span>
+                                    ) : slot.is_new ? (
+                                        `${slot.player_count} PLAYERS IN POOL`
+                                    ) : (
+                                        `${slot.player_count} PLAYERS IN SLOT`
+                                    )}
                                 </div>
 
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '30px' }}>

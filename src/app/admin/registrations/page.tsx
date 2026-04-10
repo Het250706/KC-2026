@@ -147,14 +147,28 @@ function RegistrationControlContent() {
         setLoading(true);
         try {
             const res = await fetch('/api/admin/bulk-push', { method: 'POST' });
-            const data = await res.json();
-            if (data.success) {
-                alert(`✅ SUCCESS!\n\n${data.message}`);
-                fetchRegistrations();
+            if (res.ok) {
+                const contentType = res.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const data = await res.json();
+                    if (data.success) {
+                        alert(`✅ SUCCESS!\n\n${data.message}`);
+                        fetchRegistrations();
+                    } else {
+                        alert('Error: ' + (data.error || 'Bulk push failed'));
+                    }
+                } else {
+                    const text = await res.text();
+                    console.error('Non-JSON response:', text);
+                    alert('Server returned invalid data format. Check console.');
+                }
             } else {
-                throw new Error(data.error || 'Bulk push failed');
+                const text = await res.text();
+                console.error(`Bulk Push Error (${res.status}):`, text);
+                alert(`Server Error ${res.status}: Failed to push all players. Check developer console for details.`);
             }
         } catch (err: any) {
+            console.error('Fetch Error:', err);
             alert('Error: ' + err.message);
         } finally {
             setLoading(false);

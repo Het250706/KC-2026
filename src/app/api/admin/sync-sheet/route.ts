@@ -113,8 +113,19 @@ export async function GET() {
                 .limit(1);
 
             if (inPoolArr && inPoolArr.length > 0) {
+                // REPAIR LOGIC: Even if in pool, update their category/role to match current sheet
+                const existingPoolPlayer = inPoolArr[0];
+                await supabaseAdmin
+                    .from('players')
+                    .update({ 
+                        category: occupation || 'Unassigned',
+                        role: skill || 'All-rounder',
+                        cricket_skill: skill || 'All-rounder'
+                    })
+                    .eq('id', existingPoolPlayer.id);
+
                 poolExistsCount++;
-                skippedDetails.push({ row: index + 1, name: fullName, reason: 'Already in Pool' });
+                skippedDetails.push({ row: index + 1, name: fullName, reason: 'Already in Pool (Data Updated)' });
                 continue;
             }
 
@@ -146,6 +157,7 @@ export async function GET() {
                 area_contact: areaContact,
                 birth_date: (birthDate && birthDate.trim() !== '') ? birthDate : null,
                 occupation: occupation,
+                slot: occupation, // Added slot to ensure category is preserved
                 tshirt_size: tshirtSize,
                 tshirt_number: tshirtNumber,
                 created_at: sheetSequenceDate // OVERWRITE timestamp to preserve sheet order
