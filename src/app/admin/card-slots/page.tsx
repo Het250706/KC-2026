@@ -31,42 +31,77 @@ function SlotManagementContent() {
     const fetchSlotsAndPlayers = async () => {
         setLoading(true);
         try {
-            // 1. Fetch all existing card slots
+            // 1. Fetch all existing card slots with their players
             const { data: slotsData } = await supabase
                 .from('card_slots')
                 .select('*, slot_players(player:players(*))')
-                .order('slot_number', { ascending: false });
+                .order('created_at', { ascending: true });
             
-            // 2. Fetch all unique categories from players table
+            // 2. Fetch all pending players to detect unassigned categories
             const { data: allPlayers } = await supabase
                 .from('players')
                 .select('*')
                 .eq('auction_status', 'pending');
 
-            const categories = Array.from(new Set(allPlayers?.map(p => p.category).filter(Boolean) || []));
+            const poolCategories = Array.from(new Set(allPlayers?.map(p => p.category || 'Unassigned') || []));
             
-            // 3. Match categories with slots
-            const derivedSlots = categories.map(cat => {
-                // Find a slot that contains players of this specific category
-                const existingSlot = slotsData?.find(s => 
-                    s.slot_players && s.slot_players.length > 0 && 
-                    s.slot_players.some((sp: any) => sp.player?.category === cat)
-                );
+            // 3. Process Existing Slots
+            const processedSlots: any[] = [];
+            const processedPlayerIds = new Set();
+
+            if (slotsData) {
+                // Group slots by category to assign "Part" numbers if needed
+                const categoryCounts: Record<string, number> = {};
+
+                slotsData.forEach(s => {
+                    const firstPlayer = s.slot_players?.[0]?.player;
+                    const cat = firstPlayer?.category || 'Unassigned';
+                    categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+                    
+                    const playersInSlot = s.slot_players?.map((sp: any) => sp.player) || [];
+                    playersInSlot.forEach((p: any) => processedPlayerIds.add(p.id));
+
+                    processedSlots.push({
+                        id: s.id,
+                        category: cat,
+                        displayName: categoryCounts[cat] > 1 ? `${cat} - PART ${categoryCounts[cat]}` : cat,
+                        status: s.status,
+                        is_new: false,
+                        player_count: playersInSlot.length,
+                        players: playersInSlot,
+                        created_at: s.created_at
+                    });
+                });
+            }
+
+            // 4. Find Categories that are NOT yet in any slot
+            poolCategories.forEach(cat => {
+                const pendingPlayersForCat = allPlayers?.filter(p => (p.category || 'Unassigned') === cat && !processedPlayerIds.has(p.id)) || [];
                 
-                return {
-                    id: existingSlot?.id || `new-${cat}`,
-                    category: cat,
-                    status: existingSlot?.status || 'uninitialized',
-                    is_new: !existingSlot,
-                    player_count: allPlayers?.filter(p => p.category === cat).length || 0,
-                    players: allPlayers?.filter(p => p.category === cat) || []
-                };
+                if (pendingPlayersForCat.length > 0) {
+                    processedSlots.push({
+                        id: `new-${cat}`,
+                        category: cat,
+                        displayName: cat,
+                        status: 'uninitialized',
+                        is_new: true,
+                        player_count: pendingPlayersForCat.length,
+                        players: pendingPlayersForCat,
+                        created_at: new Date().toISOString()
+                    });
+                }
             });
 
-            // --- SORT SLOTS ALPHABETICALLY ---
-            derivedSlots.sort((a, b) => (a.category as string).localeCompare(b.category as string));
+            // Sort: initialized first (by date), then new ones (alphabetic)
+            processedSlots.sort((a, b) => {
+                if (a.is_new !== b.is_new) return a.is_new ? 1 : -1;
+                if (!a.is_new) return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+                return a.category.localeCompare(b.category);
+            });
 
-            setSlots(derivedSlots);
+            setSlots(processedSlots);
+        } catch (err: any) {
+            console.error('Fetch Error:', err);
         } finally {
             setLoading(false);
         }
@@ -77,35 +112,47 @@ function SlotManagementContent() {
     }, []);
 
     const handleInitializeSlot = async (category: string, players: any[]) => {
-        if (!confirm(`Initialize card-flip auction for ${category.toUpperCase()}?`)) return;
+        if (!confirm(`Initialize card-flip auction for ${players.length} players in ${category.toUpperCase()}?`)) return;
         setLoading(true);
         try {
-            // 1. Create Slot
-            const { data: newSlot, error: slotError } = await supabase.from('card_slots').insert({
-                status: 'pending'
-            }).select().single();
+            // Split players into batches of 8
+            const batchSize = 8;
+            const batches = [];
+            for (let i = 0; i < players.length; i += batchSize) {
+                batches.push(players.slice(i, i + batchSize));
+            }
 
-            if (slotError) throw slotError;
+            for (let i = 0; i < batches.length; i++) {
+                const batch = batches[i];
+                const slotTitle = batches.length > 1 ? `${category} - Part ${i + 1}` : category;
+                
+                // 1. Create Slot
+                const { data: newSlot, error: slotError } = await supabase.from('card_slots').insert({
+                    status: 'pending'
+                }).select().single();
 
-            // 2. Assign Players to Random Positions (MAX 8 per slot for cards system usually, but user wants ALL)
-            // Let's take up to 8 if card mode is limited to 8, or all if it's dynamic. 
-            // Looking at the previous code, it was .slice(0, 8). I'll keep 8 to respect component constraints if any.
-            const shuffledPlayers = [...players].sort(() => Math.random() - 0.5).slice(0, 8);
-            const slotPlayersInsert = shuffledPlayers.map((p, index) => ({
-                slot_id: newSlot.id,
-                player_id: p.id,
-                card_position: index + 1
-            }));
+                if (slotError) throw slotError;
 
-            const { error: playersError } = await supabase.from('slot_players').insert(slotPlayersInsert);
-            if (playersError) throw playersError;
+                // 2. Assign Players to Random Positions
+                const shuffledBatch = [...batch].sort(() => Math.random() - 0.5);
+                const slotPlayersInsert = shuffledBatch.map((p, index) => ({
+                    slot_id: newSlot.id,
+                    player_id: p.id,
+                    card_position: index + 1
+                }));
 
-            // 3. Update Players Status
-            await supabase.from('players').update({ slot_status: 'in_slot' }).in('id', shuffledPlayers.map(p => p.id));
+                const { error: playersError } = await supabase.from('slot_players').insert(slotPlayersInsert);
+                if (playersError) throw playersError;
+
+                // 3. Update Players Status
+                await supabase.from('players').update({ slot_status: 'in_slot' }).in('id', shuffledBatch.map(p => p.id));
+            }
             
             fetchSlotsAndPlayers();
+            alert(`Successfully initialized ${batches.length} slots for ${category}.`);
         } catch (err: any) {
-            alert(err.message);
+            console.error('Slot Initialization Error:', err);
+            alert('Error initializing slots: ' + err.message);
         } finally {
             setLoading(false);
         }
@@ -176,7 +223,7 @@ function SlotManagementContent() {
                                             <ChevronDown size={22} color="var(--primary)" />
                                         </div>
                                         <div style={{ fontSize: '1.2rem', fontWeight: 950 }}>
-                                            { (slot as any).slot_players?.[0]?.player?.category?.toUpperCase() || (slot.slot_number ? `SLOT ${slot.slot_number}` : 'UNASSIGNED SLOT') }
+                                            { slot.displayName.toUpperCase() }
                                         </div>
                                     </div>
                                     <div style={{ padding: '6px 12px', borderRadius: '50px', background: slot.status === 'completed' ? 'rgba(0,255,128,0.1)' : slot.is_new ? 'rgba(56, 189, 248, 0.1)' : 'rgba(255,215,0,0.1)', color: slot.status === 'completed' ? '#00ff80' : slot.is_new ? '#38bdf8' : 'var(--primary)', fontWeight: 900, fontSize: '0.7rem' }}>

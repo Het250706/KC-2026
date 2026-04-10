@@ -160,12 +160,16 @@ function CardControlContent() {
                 }).eq('id', 1);
             }
 
-            const { data: allPlayers } = await supabase.from('slot_players').select('id').eq('slot_id', state.current_slot_id);
-            if (allPlayers && allPlayers.length > 0) {
-                const positionsCount = Math.max(8, allPlayers.length);
-                const availablePositions = Array.from({ length: positionsCount }, (_, i) => i + 1);
-                const shuffledPositions = availablePositions.sort(() => Math.random() - 0.5);
-                await Promise.all(allPlayers.map((card, idx) => 
+            const { data: unpickedPlayers } = await supabase
+                .from('slot_players')
+                .select('id, card_position')
+                .eq('slot_id', state.current_slot_id)
+                .eq('is_picked', false);
+
+            if (unpickedPlayers && unpickedPlayers.length > 0) {
+                const currentPositions = unpickedPlayers.map(p => p.card_position);
+                const shuffledPositions = [...currentPositions].sort(() => Math.random() - 0.5);
+                await Promise.all(unpickedPlayers.map((card, idx) => 
                     supabase.from('slot_players').update({ card_position: shuffledPositions[idx] }).eq('id', card.id)
                 ));
             }

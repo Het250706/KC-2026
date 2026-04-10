@@ -171,25 +171,31 @@ function RegistrationControlContent() {
                 body: JSON.stringify({ player })
             });
             
-            const contentType = res.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-                const result = await res.json();
-                if (result.success) {
-                    setRegistrations(prev => prev.map(p =>
-                        p.id === player.id ? { ...p, is_pushed: true } : p
-                    ));
-                    alert(`SUCCESS! ${player.name} moved to the Player Pool.`);
+            if (res.ok) {
+                const contentType = res.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const result = await res.json();
+                    if (result.success) {
+                        setRegistrations(prev => prev.map(p =>
+                            p.id === player.id ? { ...p, is_pushed: true } : p
+                        ));
+                        alert(`SUCCESS! ${player.name} moved to the Player Pool.`);
+                    } else {
+                        alert('Push failed: ' + (result.error || 'Unknown error'));
+                    }
                 } else {
-                    alert('Failed to push: ' + result.error);
+                    const text = await res.text();
+                    console.error('Unexpected non-JSON response from successful request:', text);
+                    alert('Server responded successfully but returned invalid format. Check console.');
                 }
             } else {
                 const text = await res.text();
-                console.error('Non-JSON response received:', text);
-                alert(`Error pushing player: Server returned ${res.status}. Check console for details.`);
+                console.error(`Server Error (${res.status}):`, text);
+                alert(`Server Error ${res.status}: Failed to push player. Check developer console for the error page details.`);
             }
         } catch (err: any) {
-            console.error('Fetch error:', err);
-            alert('Error pushing player: ' + err.message);
+            console.error('Network or fetch error:', err);
+            alert('Connection Error: ' + err.message);
         } finally {
             setPushingId(null);
         }

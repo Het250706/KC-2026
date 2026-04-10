@@ -23,12 +23,17 @@ export const FlipCard: React.FC<FlipCardProps> = ({
     const isPickable = isActive && isCurrentTurn && !card.is_picked && !isPicking;
 
     return (
-        <div 
+        <motion.div 
+            layout
             style={{ 
                 perspective: '1000px', 
                 width: '100%', 
                 aspectRatio: '4/5', 
                 cursor: isPickable ? 'pointer' : 'default' 
+            }}
+            transition={{ 
+                layout: { type: 'spring', damping: 25, stiffness: 120 },
+                duration: 0.8
             }}
             onClick={() => isPickable && onPick(card.card_position)}
         >
@@ -143,6 +148,6 @@ export const FlipCard: React.FC<FlipCardProps> = ({
                     )}
                 </div>
             </motion.div>
-        </div>
+        </motion.div>
     );
 };
