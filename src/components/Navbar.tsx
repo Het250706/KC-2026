@@ -76,36 +76,15 @@ export default function Navbar() {
 
     // --- RENDER HELPERS ---
 
-    const AdminLinks = () => (
-        <>
-            <Link href="/admin/dashboard" style={getNavLinkStyle('/admin/dashboard')} onClick={() => setIsMenuOpen(false)}>
-                <Shield size={18} /> <span>Admin Panel</span>
-            </Link>
-            <div className="mobile-only">
-                <Link href="/teams" style={getNavLinkStyle('/teams')} onClick={() => setIsMenuOpen(false)}>
-                    <Users size={18} /> <span>Team Squads</span>
-                </Link>
-                <Link href="/auction-history" style={getNavLinkStyle('/auction-history')} onClick={() => setIsMenuOpen(false)}>
-                    <HistoryIcon size={18} /> <span>History</span>
-                </Link>
-            </div>
-
-            <Link href="/admin/card-slots" style={getNavLinkStyle('/admin/card-slots')} onClick={() => setIsMenuOpen(false)}>
-                <LayoutGrid size={18} /> <span>Slots</span>
-            </Link>
-            <Link href="/admin/card-turns" style={getNavLinkStyle('/admin/card-turns')} onClick={() => setIsMenuOpen(false)}>
-                <Shuffle size={18} /> <span>Turns</span>
-            </Link>
-            <Link href="/admin/card-control" style={getNavLinkStyle('/admin/card-control')} onClick={() => setIsMenuOpen(false)}>
-                <Activity size={18} /> <span>Card Control</span>
-            </Link>
-            <div className="mobile-only">
-                <Link href="/auction/live-cards" style={getNavLinkStyle('/auction/live-cards')} onClick={() => setIsMenuOpen(false)}>
-                    <Zap size={18} /> <span>Live Reveal</span>
-                </Link>
-            </div>
-        </>
-    );
+    const adminMenuItems = [
+        { label: 'Admin Panel', path: '/admin/dashboard', icon: <Shield size={18} /> },
+        { label: 'Team Squads', path: '/teams', icon: <Users size={18} /> },
+        { label: 'History', path: '/auction-history', icon: <HistoryIcon size={18} /> },
+        { label: 'Slots', path: '/admin/card-slots', icon: <LayoutGrid size={18} /> },
+        { label: 'Turns', path: '/admin/card-turns', icon: <Shuffle size={18} /> },
+        { label: 'Card Control', path: '/admin/card-control', icon: <Activity size={18} /> },
+        { label: 'Live Reveal', path: '/auction/live-cards', icon: <Zap size={18} />, target: '_blank' },
+    ];
 
     const CaptainLinks = () => (
         <>
@@ -288,8 +267,12 @@ export default function Navbar() {
             </Link>
 
             {/* Desktop Navigation */}
-            <div className="desktop-only" style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
-                {role === 'admin' && <AdminLinks />}
+            <div className="mobile-hide" style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
+                {role === 'admin' && (
+                    <Link href="/admin/dashboard" style={getNavLinkStyle('/admin/dashboard')}>
+                        <Shield size={18} /> <span>Admin Panel</span>
+                    </Link>
+                )}
                 {role === 'captain' && <CaptainLinks />}
                 {user ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginLeft: '8px', paddingLeft: '18px', borderLeft: '1px solid rgba(255,255,255,0.1)' }}>
@@ -308,14 +291,15 @@ export default function Navbar() {
                                         className="hamburger-trigger"
                                         style={{ 
                                             background: 'rgba(255,255,255,0.05)', 
-                                            border: '1px solid rgba(255,255,255,0.1)', 
-                                            color: '#fff', 
+                                            border: '1px solid rgba(255, 215, 0, 0.3)', 
+                                            color: 'var(--primary)', 
                                             padding: '8px', 
                                             borderRadius: '10px', 
                                             cursor: 'pointer',
                                             display: 'flex',
                                             alignItems: 'center',
-                                            justifyContent: 'center'
+                                            justifyContent: 'center',
+                                            transition: 'all 0.2s'
                                         }}
                                     >
                                         <Menu size={20} />
@@ -340,15 +324,18 @@ export default function Navbar() {
                                             flexDirection: 'column',
                                             gap: '4px'
                                         }}>
-                                            <Link href="/teams" style={{ ...getNavLinkStyle('/teams'), padding: '12px 15px', borderRadius: '10px' }} className="dropdown-item" onClick={() => setIsMenuOpen(false)}>
-                                                <Users size={18} /> <span>Team Squads</span>
-                                            </Link>
-                                            <Link href="/auction-history" style={{ ...getNavLinkStyle('/auction-history'), padding: '12px 15px', borderRadius: '10px' }} className="dropdown-item" onClick={() => setIsMenuOpen(false)}>
-                                                <HistoryIcon size={18} /> <span>History</span>
-                                            </Link>
-                                            <Link href="/auction/live-cards" style={{ ...getNavLinkStyle('/auction/live-cards'), padding: '12px 15px', borderRadius: '10px' }} className="dropdown-item" onClick={() => setIsMenuOpen(false)}>
-                                                <Zap size={18} /> <span>Live Reveal</span>
-                                            </Link>
+                                            {adminMenuItems.slice(1).map(item => (
+                                                <Link 
+                                                    key={item.path} 
+                                                    href={item.path} 
+                                                    target={item.target}
+                                                    style={{ ...getNavLinkStyle(item.path), padding: '12px 15px', borderRadius: '10px' }} 
+                                                    className="dropdown-item" 
+                                                    onClick={() => setIsMenuOpen(false)}
+                                                >
+                                                    {item.icon} <span>{item.label}</span>
+                                                </Link>
+                                            ))}
                                         </div>
                                     </div>
                                 </>
@@ -366,15 +353,25 @@ export default function Navbar() {
             </div>
 
             {/* Mobile Navigation Toggle */}
-            <button className="mobile-only" onClick={() => setIsMenuOpen(!isMenuOpen)} style={{ color: 'var(--primary)' }}>
+            <button className="mobile-show" onClick={() => setIsMenuOpen(!isMenuOpen)} style={{ color: 'var(--primary)', background: 'none', border: 'none', cursor: 'pointer' }}>
                 {isMenuOpen ? <X size={28} /> : <Menu size={28} />}
             </button>
 
             {/* Mobile Menu Overlay for Standard Pages */}
             <AnimatePresence>
                 {isMenuOpen && (
-                    <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'rgba(0,0,0,0.98)', backdropFilter: 'blur(20px)', padding: '30px', marginTop: '10px', borderRadius: '24px', display: 'flex', flexDirection: 'column', gap: '20px', border: '1px solid var(--border)' }}>
-                        {role === 'admin' && <AdminLinks />}
+                    <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'rgba(0,0,0,0.98)', backdropFilter: 'blur(20px)', padding: '30px', marginTop: '10px', borderRadius: '24px', display: 'flex', flexDirection: 'column', gap: '20px', border: '1px solid var(--border)', zIndex: 1100 }}>
+                        {role === 'admin' && adminMenuItems.map(item => (
+                            <Link 
+                                key={item.path} 
+                                href={item.path} 
+                                target={item.target}
+                                style={getNavLinkStyle(item.path)} 
+                                onClick={() => setIsMenuOpen(false)}
+                            >
+                                {item.icon} <span>{item.label}</span>
+                            </Link>
+                        ))}
                         {role === 'captain' && <CaptainLinks />}
                         {!user && <PublicLinks />}
                         {user && (
@@ -393,12 +390,13 @@ export default function Navbar() {
                     background: rgba(255,215,0,0.05) !important;
                     color: var(--primary) !important;
                 }
-                @media (max-width: 1024px) {
-                    .desktop-only { display: none !important; }
-                    .mobile-only { display: flex !important; flex-direction: column; gap: 20px; }
+                @media (max-width: 768px) {
+                    .mobile-hide { display: none !important; }
+                    .mobile-show { display: flex !important; }
                 }
-                @media (min-width: 1025px) {
-                    .mobile-only { display: none !important; }
+                @media (min-width: 769px) {
+                    .mobile-show { display: none !important; }
+                    .mobile-hide { display: flex !important; }
                 }
             `}</style>
         </nav>

@@ -320,11 +320,11 @@ function RegistrationControlContent() {
     // Extract unique existing slots from ALL registrations (not just filtered)
 
     return (
-        <main style={{ minHeight: '100vh', background: '#000', color: '#fff' }}>
-            <div style={{ padding: '60px 20px', maxWidth: '1400px', margin: '0 auto' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' }}>
-                    <h1 style={{ fontSize: '2.5rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px' }}>
-                        PLAYER REGISTRATION CONTROL
+        <main style={{ minHeight: '100vh', background: '#000', color: '#fff', paddingBottom: '40px' }}>
+            <div className="container-responsive" style={{ maxWidth: '1400px', margin: '0 auto', paddingTop: '40px' }}>
+                <div className="responsive-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px', flexWrap: 'wrap', gap: '20px' }}>
+                    <h1 className="text-h1" style={{ fontSize: '2.5rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>
+                        REGISTRATION CONTROL
                     </h1>
                     <button
                         onClick={async () => {
@@ -406,8 +406,8 @@ function RegistrationControlContent() {
                 </div>
 
                 {/* Table Layout */}
-                <div className="glass" style={{ borderRadius: '0 0 16px 16px', overflowX: 'hidden', border: '1px solid rgba(255,255,255,0.05)' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                <div className="glass table-responsive" style={{ borderRadius: '0 0 16px 16px', overflowX: 'auto', border: '1px solid rgba(255,255,255,0.05)' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
                         <thead>
                             <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                                 <th style={{ ...thStyle, width: '60px' }}>PHOTO</th>
@@ -600,9 +600,9 @@ function RegistrationControlContent() {
                         <motion.div
                             initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
                             className="glass"
-                            style={{ padding: '40px', borderRadius: '24px', width: '450px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.1)' }}
+                            style={{ padding: 'clamp(20px, 5vw, 40px)', borderRadius: '24px', width: '90%', maxWidth: '450px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.1)' }}
                         >
-                            <h2 style={{ fontSize: '1.8rem', fontWeight: 950, marginBottom: '10px' }}>UPDATE PHOTO</h2>
+                            <h2 className="text-h2" style={{ fontSize: '1.8rem', fontWeight: 950, marginBottom: '10px' }}>UPDATE PHOTO</h2>
                             <p style={{ color: '#888', marginBottom: '30px', fontSize: '0.9rem', fontWeight: 600 }}>
                                 Update profile picture for <span style={{ color: 'var(--primary)' }}>{selectedPlayer?.name}</span>
                             </p>
@@ -698,6 +698,9 @@ function RegistrationControlContent() {
                 }
                 .bulk-push-btn:active {
                     transform: translateY(-1px);
+                }
+                @media (max-width: 768px) {
+                    .photo-container:hover { transform: scale(1.1) !important; }
                 }
             `}</style>
         </main>

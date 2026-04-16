@@ -133,22 +133,15 @@ export default function GlobalHistoryPage() {
                 .history-grid {
                     display: grid;
                     grid-template-columns: 1fr 400px;
-                    gap: 40px;
+                    gap: 30px;
                 }
-                @media (max-width: 1000px) {
-                    .history-grid {
-                        grid-template-columns: 1fr;
-                    }
+                @media (max-width: 1100px) {
+                    .history-grid { grid-template-columns: 1fr; }
                 }
                 @media (max-width: 768px) {
-                    .bid-item {
-                        flex-direction: column !important;
-                        align-items: flex-start !important;
-                        gap: 15px !important;
-                    }
-                    .bid-info {
-                        text-align: left !important;
-                    }
+                    .history-grid { gap: 20px; }
+                    .bid-item { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
+                    .bid-info { text-align: left !important; width: 100%; border-top: 1px solid var(--border); padding-top: 10px; margin-top: 5px; }
                 }
             `}</style>
         </>

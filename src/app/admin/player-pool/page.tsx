@@ -166,11 +166,19 @@ function PlayerPoolContent() {
     };
 
 
-    const filtered = players.filter(p => 
-        `${p.first_name} ${p.last_name}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.role?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.category?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const filtered = players
+        .filter(p => 
+            `${p.first_name} ${p.last_name}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            p.role?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            p.category?.toLowerCase().includes(searchTerm.toLowerCase())
+        )
+        .sort((a, b) => {
+            const isACaptain = teams.some(t => t.captain_email === a.email);
+            const isBCaptain = teams.some(t => t.captain_email === b.email);
+            if (isACaptain && !isBCaptain) return -1;
+            if (!isACaptain && isBCaptain) return 1;
+            return 0;
+        });
 
     return (
         <main style={{ minHeight: '100vh', background: '#000', color: '#fff' }}>
@@ -263,7 +271,10 @@ function PlayerPoolContent() {
                                             </div>
                                         </td>
                                         <td style={tdStyle}>
-                                            <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#fff' }}>{p.first_name} {p.last_name}</div>
+                                            <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#fff' }}>
+                                                {p.first_name} {p.last_name}
+                                                {/* Captain badge removed */}
+                                            </div>
                                         </td>
                                         <td style={tdStyle}>
                                             <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#fff' }}>{p.cricket_skill || p.role}</div>

@@ -207,6 +207,9 @@ function AdminLiveScoreContent() {
 
         if (inn) {
             setCurrentInnings(inn);
+            setStrikerId(inn.striker_id || '');
+            setBowlerId(inn.bowler_id || '');
+            
             if (inn.innings_number === 2) {
                 const { data: inn1 } = await supabase.from('innings').select('runs').eq('match_id', match.id).eq('innings_number', 1).single();
                 if (inn1) setFirstInningsRuns(inn1.runs);
@@ -416,9 +419,12 @@ function AdminLiveScoreContent() {
         const isLegalBall = extraType !== 'wide' && extraType !== 'no_ball';
         const currentBalls = Math.round(((currentInnings?.overs || 0) % 1) * 10);
         if (isLegalBall && currentBalls === 5) {
-            alert('Over Completed! Please select a NEW bowler.');
-            setPreviousBowlerId(bowlerId);
-            setBowlerId('');
+            // Wait a tiny bit so the score updates to 1.0, 2.0 etc on screen first
+            setTimeout(() => {
+                alert('Over Completed! Please select a NEW bowler.');
+                setPreviousBowlerId(bowlerId);
+                setBowlerId('');
+            }, 600);
         }
     };
 
@@ -607,29 +613,29 @@ function AdminLiveScoreContent() {
 
     return (
         <main style={{ minHeight: '100vh', background: '#000', color: '#fff' }}>
-            <div className="container-responsive" style={{ padding: '40px 20px', maxWidth: '1400px', margin: '0 auto' }}>
+            <div className="container-responsive" style={{ padding: '0 10px 20px 10px', maxWidth: '1400px', margin: '0 auto' }}>
 
                 {/* Header Section */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' }}>
+                <div className="responsive-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
                     <div>
-                        <h1 style={{ fontSize: '2.5rem', fontWeight: 950 }}>
+                        <h1 className="responsive-title" style={{ fontSize: '2.5rem', fontWeight: 950, margin: 0 }}>
                             {view === 'matches' && <>Tournament <span style={{ color: 'var(--primary)' }}>Center</span></>}
                             {view === 'create' && <>Setup <span style={{ color: 'var(--primary)' }}>Match</span></>}
                             {view === 'squad' && <>Select <span style={{ color: 'var(--primary)' }}>Playing XI</span></>}
                             {view === 'toss' && <>Match <span style={{ color: 'var(--primary)' }}>Toss</span></>}
                             {view === 'scoring' && <>Live <span style={{ color: 'var(--primary)' }}>Scoring Console</span></>}
                         </h1>
-                        <p style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Manage tournament matches and real-time scores</p>
+                        <p style={{ color: 'var(--text-muted)', fontWeight: 600, fontSize: '0.9rem', marginTop: '5px' }}>Manage tournament matches and real-time scores</p>
                     </div>
                     {view !== 'matches' && (
-                        <div style={{ display: 'flex', gap: '10px' }}>
-                            <a href="/scoreboard" target="_blank" className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0, 255, 128, 0.1)', borderColor: '#00ff80', color: '#00ff80', textDecoration: 'none', fontSize: '0.8rem' }}>
+                        <div className="header-actions" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                            <a href="/scoreboard" target="_blank" className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0, 255, 128, 0.1)', borderColor: '#00ff80', color: '#00ff80', textDecoration: 'none', fontSize: '0.8rem', padding: '12px 20px', borderRadius: '12px', fontWeight: 800 }}>
                                 <Zap size={18} /> LIVE PUBLIC LINK
                             </a>
-                            <button onClick={fetchTournamentStats} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <button onClick={fetchTournamentStats} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 20px', borderRadius: '12px', fontWeight: 800 }}>
                                 <RefreshCw size={18} /> REFRESH
                             </button>
-                            <button onClick={() => setView('matches')} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <button onClick={() => setView('matches')} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 20px', borderRadius: '12px', fontWeight: 800 }}>
                                 <ChevronLeft size={18} /> EXIT CONSOLE
                             </button>
                         </div>
@@ -637,54 +643,119 @@ function AdminLiveScoreContent() {
                 </div>
 
                 {/* Top Statistics Bar */}
+                {/* Top Statistics Bar - Real-time Cumulative Leaderboard */}
                 {view === 'matches' && (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', marginBottom: '40px' }}>
-                        <div className="glass" style={{ padding: '20px', borderRadius: '20px', textAlign: 'center' }}>
-                            <Trophy size={24} color="var(--primary)" style={{ marginBottom: '10px' }} />
-                            <div style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--text-muted)' }}>BEST BATSMAN</div>
-                            <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>
-                                {tournamentStats[0]?.total_runs > 0 ? `${tournamentStats[0].first_name} (${tournamentStats[0].total_runs} Runs)` : '---'}
-                            </div>
-                        </div>
-                        <div className="glass" style={{ padding: '20px', borderRadius: '20px', textAlign: 'center', border: '1px solid rgba(0, 255, 128, 0.2)' }}>
-                            <Target size={24} color="#00ff80" style={{ marginBottom: '10px' }} />
-                            <div style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--text-muted)', textTransform: 'uppercase' }}>BEST BOWLER</div>
-                            <div style={{ fontSize: '1.2rem', fontWeight: 900, color: '#00ff80' }}>
+                    <div className="stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '15px', marginBottom: '30px' }}>
+                        {/* BEST BATSMAN CARD */}
+                        <motion.div 
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="glass stat-card" 
+                            style={{ 
+                                textAlign: 'center',
+                                background: 'linear-gradient(135deg, rgba(255,215,0,0.05) 0%, rgba(0,0,0,0) 100%)',
+                                border: '1px solid rgba(255,215,0,0.1)'
+                            }}
+                        >
+                            <Trophy size={24} color="var(--primary)" style={{ marginBottom: '10px', filter: 'drop-shadow(0 0 10px rgba(255,215,0,0.3))' }} />
+                            <div style={{ fontSize: '0.65rem', fontWeight: 950, color: 'var(--text-muted)', letterSpacing: '2px', textTransform: 'uppercase' }}>BEST BATSMAN</div>
+                            <div style={{ minHeight: '60px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
                                 {(() => {
-                                    const best = [...tournamentStats].sort((a, b) => b.total_wickets - a.total_wickets)[0];
-                                    return best && best.total_wickets > 0 ? `${best.first_name} (${best.total_wickets} Wkts)` : '---';
+                                    const best = [...tournamentStats].sort((a,b) => (b.total_runs || 0) - (a.total_runs || 0))[0];
+                                    if (best && best.total_runs > 0) {
+                                        return (
+                                            <>
+                                                <div style={{ fontSize: '1rem', fontWeight: 950, color: '#fff', marginTop: '5px' }}>{best.first_name} {best.last_name}</div>
+                                                <div style={{ fontSize: '0.85rem', fontWeight: 900, color: 'var(--primary)' }}>{best.total_runs} <span style={{ fontSize: '0.6rem', opacity: 0.6 }}>RUNS</span></div>
+                                            </>
+                                        );
+                                    }
+                                    return <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'rgba(255,255,255,0.1)', marginTop: '10px' }}>---</div>;
                                 })()}
                             </div>
-                        </div>
-                        <div className="glass" style={{ padding: '20px', borderRadius: '20px', textAlign: 'center', border: '1px solid var(--primary)' }}>
-                            <Zap size={24} color="#ffd700" style={{ marginBottom: '10px' }} />
-                            <div style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--text-muted)', textTransform: 'uppercase' }}>PLAYER OF TOURNAMENT</div>
-                            <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--primary)' }}>
+                        </motion.div>
+
+                        <motion.div 
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.1 }}
+                            className="glass" 
+                            style={{ 
+                                padding: '15px', 
+                                borderRadius: '20px', 
+                                textAlign: 'center',
+                                background: 'linear-gradient(135deg, rgba(0,255,128,0.05) 0%, rgba(0,0,0,0) 100%)',
+                                border: '1px solid rgba(0,255,128,0.1)'
+                            }}
+                        >
+                            <Target size={24} color="#00ff80" style={{ marginBottom: '10px', filter: 'drop-shadow(0 0 10px rgba(0,255,128,0.3))' }} />
+                            <div style={{ fontSize: '0.65rem', fontWeight: 950, color: 'var(--text-muted)', letterSpacing: '2px', textTransform: 'uppercase' }}>BEST BOWLER</div>
+                            <div style={{ minHeight: '60px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
                                 {(() => {
-                                    const best = [...tournamentStats].sort((a, b) => (b.pot_score || 0) - (a.pot_score || 0))[0];
-                                    return best && best.pot_score > 0 ? `${best.first_name}` : '---';
+                                    const best = [...tournamentStats].sort((a,b) => (b.total_wickets || 0) - (a.total_wickets || 0))[0];
+                                    if (best && best.total_wickets > 0) {
+                                        return (
+                                            <>
+                                                <div style={{ fontSize: '1rem', fontWeight: 950, color: '#fff', marginTop: '5px' }}>{best.first_name} {best.last_name}</div>
+                                                <div style={{ fontSize: '0.85rem', fontWeight: 900, color: '#00ff80' }}>{best.total_wickets} <span style={{ fontSize: '0.6rem', opacity: 0.6 }}>WICKETS</span></div>
+                                            </>
+                                        );
+                                    }
+                                    return <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'rgba(255,255,255,0.1)', marginTop: '10px' }}>---</div>;
                                 })()}
                             </div>
-                        </div>
+                        </motion.div>
+
+                        <motion.div 
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.2 }}
+                            className="glass" 
+                            style={{ 
+                                padding: '15px', 
+                                borderRadius: '20px', 
+                                textAlign: 'center',
+                                background: 'linear-gradient(135deg, rgba(255,215,0,0.08) 0%, rgba(0,0,0,0) 100%)',
+                                border: '1px solid var(--primary)',
+                                boxShadow: '0 0 30px rgba(255,215,0,0.05)'
+                            }}
+                        >
+                            <Zap size={24} color="#ffd700" style={{ marginBottom: '10px', filter: 'drop-shadow(0 0 15px rgba(255,215,0,0.4))' }} />
+                            <div style={{ fontSize: '0.65rem', fontWeight: 950, color: 'var(--text-muted)', letterSpacing: '2px', textTransform: 'uppercase' }}>PLAYER OF TOURNAMENT</div>
+                            <div style={{ minHeight: '60px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+                                {(() => {
+                                    const best = [...tournamentStats].sort((a,b) => (b.pot_score || 0) - (a.pot_score || 0))[0];
+                                    if (best && (best.total_runs > 0 || best.total_wickets > 0)) {
+                                        return (
+                                            <>
+                                                <div style={{ fontSize: '1rem', fontWeight: 950, color: '#fff', marginTop: '5px' }}>{best.first_name} {best.last_name}</div>
+                                                <div style={{ fontSize: '0.85rem', fontWeight: 900, color: 'var(--primary)' }}>{Math.round(best.pot_score)} <span style={{ fontSize: '0.6rem', opacity: 0.6 }}>POT POINTS</span></div>
+                                            </>
+                                        );
+                                    }
+                                    return <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'rgba(255,255,255,0.1)', marginTop: '10px' }}>---</div>;
+                                })()}
+                            </div>
+                        </motion.div>
                     </div>
                 )}
 
                 <AnimatePresence mode="wait">
                     {view === 'matches' && (
                         <motion.div key="matches" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '15px', marginBottom: '20px' }}>
-                                <a href="/scoreboard" target="_blank" className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0, 255, 128, 0.1)', borderColor: '#00ff80', color: '#00ff80', textDecoration: 'none', fontSize: '0.8rem', padding: '0 20px' }}>
+                            <div className="header-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '15px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                                <a href="/scoreboard" target="_blank" className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0, 255, 128, 0.1)', borderColor: '#00ff80', color: '#00ff80', textDecoration: 'none', fontSize: '0.8rem', padding: '12px 24px', borderRadius: '12px', fontWeight: 800, justifyContent: 'center' }}>
                                     <Zap size={18} /> LIVE PUBLIC LINK
                                 </a>
-                                <button onClick={() => setView('stats')} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '15px 30px' }}>
+                                <button onClick={() => setView('stats')} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 24px', borderRadius: '12px', fontWeight: 800, justifyContent: 'center' }}>
                                     <Trophy size={20} /> FULL STATISTICS
                                 </button>
-                                <button onClick={() => setView('create')} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '15px 30px' }}>
+                                <button onClick={() => setView('create')} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 24px', borderRadius: '12px', fontWeight: 800, justifyContent: 'center' }}>
                                     <Plus size={20} /> CREATE MATCH
                                 </button>
                             </div>
 
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: '25px' }}>
+                            <div className="responsive-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
                                 {matches.map(m => (
                                     <div key={m.id} className="glass" style={{ padding: '30px', borderRadius: '25px', border: '1px solid var(--border)', position: 'relative' }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
@@ -750,7 +821,7 @@ function AdminLiveScoreContent() {
                                         <thead>
                                             <tr style={{ background: 'rgba(255,255,255,0.05)', textAlign: 'left' }}>
                                                 <th style={{ padding: '20px' }}>PLAYER</th>
-                                                <th style={{ padding: '20px' }}>ROLE</th>
+                                                <th style={{ padding: '20px' }}>TEAM</th>
                                                 <th style={{ padding: '20px' }}>RUNS</th>
                                                 <th style={{ padding: '20px' }}>WICKETS</th>
                                                 <th style={{ padding: '20px' }}>POT SCORE</th>
@@ -763,9 +834,12 @@ function AdminLiveScoreContent() {
                                                         <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#222', overflow: 'hidden' }}>
                                                             <img src={fixPhotoUrl(s.photo_url, s.first_name)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" onError={(e) => { (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${s.first_name}`; }} />
                                                         </div>
-                                                        <span style={{ fontWeight: 800 }}>{s.first_name} {s.last_name}</span>
+                                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                            <span style={{ fontWeight: 800 }}>{s.first_name} {s.last_name}</span>
+                                                            <span style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--text-muted)', opacity: 0.6 }}>{s.role?.toUpperCase()}</span>
+                                                        </div>
                                                     </td>
-                                                    <td style={{ padding: '15px 20px', color: 'var(--text-muted)' }}>{s.role}</td>
+                                                    <td style={{ padding: '15px 20px', color: 'var(--primary)', fontWeight: 950, fontSize: '0.8rem' }}>{s.team_name?.toUpperCase() || '-'}</td>
                                                     <td style={{ padding: '15px 20px', fontWeight: 900 }}>{s.total_runs}</td>
                                                     <td style={{ padding: '15px 20px', fontWeight: 900, color: '#00ff80' }}>{s.total_wickets}</td>
                                                     <td style={{ padding: '15px 20px', fontWeight: 900, color: 'var(--primary)' }}>{Math.round(s.pot_score)}</td>
@@ -780,8 +854,8 @@ function AdminLiveScoreContent() {
 
                     {view === 'create' && (
                         <motion.div key="create" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
-                            <div className="glass" style={{ maxWidth: '800px', margin: '0 auto', padding: '40px', borderRadius: '30px' }}>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '25px', marginBottom: '25px' }}>
+                            <div className="glass shadow-premium" style={{ padding: 'clamp(20px, 5vw, 40px)', borderRadius: '30px', maxWidth: '800px', margin: '0 auto' }}>
+                                <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '25px', marginBottom: '25px' }}>
                                     <div>
                                         <label style={labelStyle}>MATCH NAME</label>
                                         <input style={inputStyle} placeholder="e.g. League Match 1" value={formData.match_name} onChange={e => setFormData({ ...formData, match_name: e.target.value })} />
@@ -796,7 +870,7 @@ function AdminLiveScoreContent() {
                                         </select>
                                     </div>
                                 </div>
-                                <div style={{ marginBottom: '25px' }}>
+                                <div style={{ marginBottom: '20px' }}>
                                     <label style={labelStyle}>OVERS PER INNINGS</label>
                                     <select style={inputStyle} value={formData.max_overs} onChange={e => setFormData({ ...formData, max_overs: e.target.value })}>
                                         <option value="6">6 Overs</option>
@@ -804,7 +878,7 @@ function AdminLiveScoreContent() {
                                         <option value="10">10 Overs</option>
                                     </select>
                                 </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '25px', marginBottom: '25px' }}>
+                                <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
                                     <div>
                                         <label style={labelStyle}>TEAM 1</label>
                                         <select style={inputStyle} value={formData.team1_id} onChange={e => setFormData({ ...formData, team1_id: e.target.value })}>
@@ -829,11 +903,11 @@ function AdminLiveScoreContent() {
 
                     {view === 'squad' && (
                         <motion.div key="squad" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginBottom: '30px' }}>
+                            <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
                                 {/* TEAM A Squad Selector */}
                                 <div className="glass" style={{ padding: '30px', borderRadius: '25px' }}>
                                     <h3 style={{ marginBottom: '20px', fontWeight: 900, textTransform: 'uppercase' }}>
-                                        {getTeamName(activeMatch?.team1_id)} ROSTER ({selectedSquadA.length})
+                                        {getTeamName(activeMatch?.team1_id)} TEAM SQUAD ({selectedSquadA.length})
                                     </h3>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '500px', overflowY: 'auto', paddingRight: '10px' }}>
                                         {teamAPlayers.length === 0 && <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>No players found for this team.</div>}
@@ -864,7 +938,7 @@ function AdminLiveScoreContent() {
                                 {/* TEAM B Squad Selector */}
                                 <div className="glass" style={{ padding: '30px', borderRadius: '25px' }}>
                                     <h3 style={{ marginBottom: '20px', fontWeight: 900, textTransform: 'uppercase' }}>
-                                        {getTeamName(activeMatch?.team2_id)} ROSTER ({selectedSquadB.length})
+                                        {getTeamName(activeMatch?.team2_id)} TEAM SQUAD ({selectedSquadB.length})
                                     </h3>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '500px', overflowY: 'auto', paddingRight: '10px' }}>
                                         {teamBPlayers.length === 0 && <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>No players found for this team.</div>}
@@ -1034,7 +1108,7 @@ function AdminLiveScoreContent() {
                                     )}
 
                                     {/* Striker & Bowler Selection */}
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '30px' }}>
+                                    <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '25px' }}>
                                         <div>
                                             <label style={labelStyle}>STRIKER</label>
                                             <select style={inputStyle} value={strikerId} onChange={e => setStrikerId(e.target.value)}>
@@ -1086,9 +1160,8 @@ function AdminLiveScoreContent() {
                                     </div>
 
                                     {/* Extras & Actions */}
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
-                                        <button onClick={() => recordBall(0, false, 'wide')} className="btn-secondary" style={{ padding: '20px', fontSize: '1.1rem', fontWeight: 900, borderRadius: '20px', color: '#ffd700', borderColor: '#ffd700' }}>WIDE</button>
-                                        <button onClick={() => recordBall(0, false, 'no_ball')} className="btn-secondary" style={{ padding: '20px', fontSize: '1.1rem', fontWeight: 900, borderRadius: '20px', color: '#ffd700', borderColor: '#ffd700' }}>NO BALL</button>
+                                    <div style={{ marginBottom: '20px' }}>
+                                        <button onClick={() => recordBall(0, false, 'wide')} className="btn-secondary" style={{ width: '100%', padding: '30px', fontSize: '1.8rem', fontWeight: 950, borderRadius: '25px', color: '#ffd700', borderColor: '#ffd700' }}>WIDE</button>
                                     </div>
 
                                     <button
@@ -1099,7 +1172,7 @@ function AdminLiveScoreContent() {
                                         WICKET
                                     </button>
 
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '40px' }}>
                                         <button
                                             onClick={handleUndo}
                                             disabled={loading || matchEvents.filter(e => e.innings_id === currentInnings.id).length === 0}
@@ -1155,7 +1228,10 @@ function AdminLiveScoreContent() {
                             )}
 
                             {(scoringTab === 'team_a' || scoringTab === 'team_b') && activeMatch && (
-                                <MatchScorecard matchId={activeMatch.id} />
+                                <MatchScorecard 
+                                    matchId={activeMatch?.id} 
+                                    forcedTeamId={scoringTab === 'team_a' ? activeMatch.team1_id : activeMatch.team2_id} 
+                                />
                             )}
                         </motion.div>
                     )}
@@ -1206,6 +1282,31 @@ function AdminLiveScoreContent() {
                     .mobile-score-container { padding: 15px !important; }
                     .score-text { font-size: 3rem !important; }
                     .btn-secondary { padding: 15px !important; font-size: 1.5rem !important; }
+                }
+            `}</style>
+            <style jsx global>{`
+                .container-responsive { width: 100%; padding: 0 15px 30px 15px; }
+                .stat-card { padding: 25px; border-radius: 25px; }
+                
+                @media (max-width: 768px) {
+                    .responsive-title { font-size: 1.8rem !important; text-align: center; }
+                    .responsive-header { flex-direction: column !important; align-items: stretch !important; text-align: center; }
+                    .header-actions { display: grid !important; grid-template-columns: 1fr; gap: 10px !important; }
+                    .header-actions a, .header-actions button { width: 100% !important; justify-content: center !important; padding: 15px !important; }
+                    
+                    .stat-grid { grid-template-columns: 1fr !important; gap: 10px !important; }
+                    .stat-card { padding: 15px !important; border-radius: 20px !important; }
+                    .stat-card svg { width: 20px !important; height: 20px !important; }
+                    .stat-card div { min-height: 40px !important; }
+                    
+                    .responsive-grid-2 { grid-template-columns: 1fr !important; gap: 15px !important; }
+                    .glass { padding: 20px !important; border-radius: 24px !important; }
+                    th, td { padding: 12px 10px !important; font-size: 0.75rem !important; }
+                }
+                
+                @media (max-width: 480px) {
+                    .responsive-title { font-size: 1.5rem !important; }
+                    .header-actions { grid-template-columns: 1fr !important; }
                 }
             `}</style>
         </main>

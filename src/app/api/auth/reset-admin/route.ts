@@ -8,7 +8,7 @@ export async function GET() {
     );
 
     const adminEmails = ['admin@keshav.com', 'het@keshav.com'];
-    const newPassword = 'petladkeshavcup';
+    const newPassword = 'keshavcup';
     const results: any[] = [];
 
     try {

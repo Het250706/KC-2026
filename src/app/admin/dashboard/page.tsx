@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import Navbar from '@/components/Navbar';
-import { Trash2, X, Gavel, Users, UserPlus, Shield, LogOut, Zap, Shuffle, Download, Link as LinkIcon, ExternalLink, Settings, LayoutGrid, Hammer, RotateCcw, PieChart, History as HistoryIcon } from 'lucide-react';
+import { Trash2, X, Gavel, Users, UserPlus, Shield, LogOut, Zap, Shuffle, Download, Link as LinkIcon, ExternalLink, Settings, LayoutGrid, Hammer, RotateCcw, PieChart, History as HistoryIcon, Trophy, Target } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import RoleGuard from '@/components/RoleGuard';
@@ -39,20 +39,40 @@ function AdminDashboardContent() {
     const router = useRouter();
 
     const [registrationsCount, setRegistrationsCount] = useState(0);
+    const [tournamentStats, setTournamentStats] = useState<any[]>([]);
+
+    const captains = [
+        'Shivkumar Mukesh bhai patel',
+        'Vatsal Mukeshbhai Patel',
+        'Taksh KaPatel',
+        'Vandan AtulBhai patel',
+        'Aksharbhai Patel',
+        'PATEL DARPAN RAJNIKUMAR',
+        'Miten Kalpeshbhai Chauhan',
+        'Yogi Shah'
+    ];
+
+    const isCaptain = (firstName: string, lastName: string) => {
+        const fullName = `${firstName} ${lastName}`.trim().toLowerCase();
+        return captains.some(c => c.trim().toLowerCase() === fullName);
+    };
 
     const fetchData = async () => {
         try {
-            const [playersRes, stateRes, teamsRes, regRes] = await Promise.all([
+            const [playersRes, stateRes, teamsRes, regRes, statsRes, matchesRes] = await Promise.all([
                 supabase.from('players').select('*').order('created_at', { ascending: false }),
                 supabase.from('auction_state').select('*').single(),
                 supabase.from('teams').select('*').order('name'),
-                supabase.from('registrations').select('id', { count: 'exact', head: true }).eq('is_pushed', false)
+                supabase.from('registrations').select('id', { count: 'exact', head: true }).eq('is_pushed', false),
+                supabase.from('tournament_player_stats').select('*').order('total_runs', { ascending: false }),
+                supabase.from('matches').select('*').order('created_at', { ascending: false })
             ]);
 
             if (playersRes.data) setPlayers(playersRes.data);
             if (stateRes.data) setAuctionState(stateRes.data);
             if (teamsRes.data) setTeams(teamsRes.data);
             if (regRes.count !== null) setRegistrationsCount(regRes.count);
+            if (statsRes.data) setTournamentStats(statsRes.data);
 
             // Combine unique slots from both tables for dropdowns
             const playerCats = playersRes.data?.map(p => p.category).filter(Boolean) || [];
@@ -81,6 +101,8 @@ function AdminDashboardContent() {
             .on('postgres_changes' as any, { event: '*', table: 'players', schema: 'public' }, () => { if (isMounted) fetchData(); })
             .on('postgres_changes' as any, { event: '*', table: 'teams', schema: 'public' }, () => { if (isMounted) fetchData(); })
             .on('postgres_changes' as any, { event: '*', table: 'bids', schema: 'public' }, () => { if (isMounted) fetchData(); })
+            .on('postgres_changes' as any, { event: '*', table: 'matches', schema: 'public' }, () => { if (isMounted) fetchData(); })
+            .on('postgres_changes' as any, { event: '*', table: 'match_events', schema: 'public' }, () => { if (isMounted) fetchData(); })
             .subscribe();
 
         return () => {
@@ -135,6 +157,32 @@ function AdminDashboardContent() {
         }
     };
 
+    const manualAssignTeam = async (playerId: string, teamId: string) => {
+        if (!teamId) return;
+        try {
+            setSyncing(true);
+            const { error } = await supabase
+                .from('players')
+                .update({
+                    team_id: teamId,
+                    auction_status: 'sold'
+                })
+                .eq('id', playerId);
+
+            if (error) throw error;
+            
+            // Optionally audit budgets after manual assignment
+            await fetch('/api/admin/audit-budgets', { method: 'POST' });
+            
+            fetchData();
+        } catch (err: any) {
+            console.error('Manual Assign Error:', err);
+            alert('Failed to assign team: ' + err.message);
+        } finally {
+            setSyncing(false);
+        }
+    };
+
     const drawRandom = async () => {
         // Filter players based on selected slot
         const pool = selectedSlot === 'All'
@@ -174,7 +222,7 @@ function AdminDashboardContent() {
                     .update({ slot: category })
                     .ilike('name', `%${firstName}%`)
                     .ilike('name', `%${lastName}%`);
-
+                
                 fetchData();
             }
         } catch (err) {
@@ -220,8 +268,6 @@ function AdminDashboardContent() {
             setSyncing(false);
         }
     };
-
-
 
     const auditBudgets = async () => {
         if (!confirm('Re-calculate all team budgets based on actual sold players? This will fix discrepancies caused by manual deletions.')) return;
@@ -283,8 +329,6 @@ function AdminDashboardContent() {
         }
     };
 
-
-
     const bulkDeleteAll = async () => {
         if (!confirm('🚨 EMERGENCY RESET: This will remove ALL players from the auction pool, clear ALL sold players, and return everyone to Registration Control. Are you absolutely sure?')) return;
 
@@ -311,33 +355,32 @@ function AdminDashboardContent() {
 
     return (
         <>
-            <main style={{ background: '#000', minHeight: '100vh' }}>
-                <div style={{ padding: '20px', maxWidth: '1400px', margin: '0 auto' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', flexWrap: 'wrap', gap: '20px' }}>
-                        <div>
-                            <h1 style={{ fontSize: 'clamp(1.5rem, 5vw, 2.2rem)', fontWeight: 900 }}>Admin <span style={{ color: 'var(--primary)' }}>Control</span></h1>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                                <span style={{
-                                    background: 'rgba(255, 75, 75, 0.1)',
-                                    color: '#ff4b4b',
-                                    border: '1px solid rgba(255, 75, 75, 0.3)',
-                                    padding: '4px 12px',
-                                    borderRadius: '8px',
-                                    fontSize: '0.7rem',
-                                    fontWeight: 800,
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '1px'
-                                }}>LIVE CONSOLE</span>
-                                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Players in Pool: <b style={{ color: '#fff' }}>{players.length}</b></p>
-                                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>•</p>
-                                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Pending: <b style={{ color: 'var(--primary)' }}>{registrationsCount}</b></p>
-                            </div>
+        <main style={{ background: '#000', minHeight: '100vh', paddingBottom: '40px' }}>
+            <div className="container-responsive" style={{ maxWidth: '1400px', margin: '0 auto', paddingTop: '20px' }}>
+
+                <div className="responsive-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', flexWrap: 'wrap', gap: '20px' }}>
+                    <div>
+                        <h1 className="text-h1" style={{ fontSize: '2.5rem', fontWeight: 950, margin: 0 }}>Admin <span style={{ color: 'var(--primary)' }}>Control</span></h1>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '8px' }}>
+                            <span style={{
+                                background: 'rgba(255, 75, 75, 0.1)',
+                                color: '#ff4b4b',
+                                border: '1px solid rgba(255, 75, 75, 0.3)',
+                                padding: '4px 12px',
+                                borderRadius: '8px',
+                                fontSize: '0.7rem',
+                                fontWeight: 800,
+                                textTransform: 'uppercase',
+                                letterSpacing: '1px'
+                            }}>LIVE CONSOLE</span>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Pool: <b style={{ color: '#fff' }}>{players.length}</b></p>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>•</p>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Pending: <b style={{ color: 'var(--primary)' }}>{registrationsCount}</b></p>
                         </div>
                     </div>
+                </div>
 
-                    <div style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', display: 'grid', gap: '20px', marginBottom: '40px' }}>
-
-
+                <div className="grid-2 grid-3 grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '40px' }}>
                         {/* Registration Control Box */}
                         <motion.div
                             whileHover={{ scale: 1.02, translateY: -5 }}
@@ -393,7 +436,6 @@ function AdminDashboardContent() {
                                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Configure Categories</p>
                             </div>
                         </motion.div>
-
 
                         {/* Live Reveal Display Box */}
                         <motion.div
@@ -545,8 +587,8 @@ function AdminDashboardContent() {
                                     </button>
                                 </div>
                             </div>
-                            <div className="scrollable-table" style={{ maxHeight: 'calc(100vh - 250px)', overflowY: 'auto', overflowX: 'auto' }}>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
+                            <div className="table-responsive scrollable-table" style={{ maxHeight: 'calc(100vh - 250px)', overflowY: 'auto', overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '800px' }}>
                                     <thead>
                                         <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
                                             <th style={{ ...thStyle, width: '70px' }}>PHOTO</th>
@@ -580,7 +622,14 @@ function AdminDashboardContent() {
                                                     </tr>
                                                 );
                                             }
-                                            return filteredPlayers.map((p) => (
+                                            const sortedPlayers = [...filteredPlayers].sort((a, b) => {
+                                                const aCap = isCaptain(a.first_name, a.last_name);
+                                                const bCap = isCaptain(b.first_name, b.last_name);
+                                                if (aCap && !bCap) return -1;
+                                                if (!aCap && bCap) return 1;
+                                                return 0;
+                                            });
+                                            return sortedPlayers.map((p) => (
                                                 <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }} className="table-row-hover">
                                                     <td style={tdStyle}>
                                                         <div className="admin-photo-container" style={{ width: '46px', height: '46px', borderRadius: '12px', background: '#222', overflow: 'hidden', margin: '0 auto', border: '1px solid rgba(255,255,255,0.1)', position: 'relative' }}>
@@ -596,7 +645,10 @@ function AdminDashboardContent() {
                                                         </div>
                                                     </td>
                                                     <td style={{ ...tdStyle, textAlign: 'left' }}>
-                                                        <div style={{ fontWeight: 800, color: '#fff', fontSize: '1.2rem' }}>{p.first_name} {p.last_name}</div>
+                                                        <div style={{ fontWeight: 800, color: '#fff', fontSize: '1.2rem' }}>
+                                                            {p.first_name} {p.last_name}
+
+                                                        </div>
                                                     </td>
                                                     <td style={tdStyle}>
                                                         <div style={{ fontWeight: 900, fontSize: '1.1rem', color: '#fff' }}>{p.cricket_skill || p.role}</div>
@@ -658,24 +710,46 @@ function AdminDashboardContent() {
                                                         )}
                                                     </td>
                                                     <td style={tdStyle}>
-                                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center' }}>
-                                                            {p.auction_status === 'sold' && (
-                                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center', justifyContent: 'center' }}>
-                                                                    <div style={{ background: 'rgba(0, 255, 128, 0.1)', color: '#00ff80', padding: '6px 12px', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 950 }}>SOLD</div>
-                                                                    <div style={{ fontSize: '0.65rem', color: '#888', fontWeight: 800 }}>{teams.find(t => t.id === p.team_id || t.id === p.sold_to_team_id)?.name || 'ASSIGNED'}</div>
-                                                                </div>
-                                                            )}
-                                                            {p.auction_status === 'active' && (
-                                                                <div style={{ background: 'rgba(255, 215, 0, 0.1)', color: 'var(--primary)', padding: '6px 12px', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 950, border: '1px solid var(--primary)' }}>LIVE</div>
-                                                            )}
-                                                            {p.auction_status === 'unsold' && (
-                                                                <div style={{ background: 'rgba(255, 75, 75, 0.1)', color: '#ff4b4b', padding: '6px 12px', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 950 }}>UNSOLD</div>
-                                                            )}
-                                                            {p.auction_status === 'pending' && (
-                                                                <div style={{ padding: '8px 16px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', color: '#444', fontWeight: 900, fontSize: '0.65rem', border: '1px solid rgba(255,255,255,0.1)', cursor: 'not-allowed', textTransform: 'uppercase' }}>
-                                                                    CARD SYSTEM ACTIVE
-                                                                </div>
-                                                            )}
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'center', justifyContent: 'center' }}>
+                                                            {/* Status Badge */}
+                                                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                                                {p.auction_status === 'sold' && (
+                                                                    <div style={{ background: 'rgba(0, 255, 128, 0.1)', color: '#00ff80', padding: '4px 10px', borderRadius: '6px', fontSize: '0.65rem', fontWeight: 950 }}>SOLD</div>
+                                                                )}
+                                                                {p.auction_status === 'active' && (
+                                                                    <div style={{ background: 'rgba(255, 215, 0, 0.1)', color: 'var(--primary)', padding: '4px 10px', borderRadius: '6px', fontSize: '0.65rem', fontWeight: 950, border: '1px solid var(--primary)' }}>LIVE</div>
+                                                                )}
+                                                                {p.auction_status === 'unsold' && (
+                                                                    <div style={{ background: 'rgba(255, 75, 75, 0.1)', color: '#ff4b4b', padding: '4px 10px', borderRadius: '6px', fontSize: '0.65rem', fontWeight: 950 }}>UNSOLD</div>
+                                                                )}
+                                                                {p.auction_status === 'pending' && (
+                                                                    <div style={{ background: 'rgba(255, 255, 255, 0.05)', color: '#666', padding: '4px 10px', borderRadius: '6px', fontSize: '0.65rem', fontWeight: 950 }}>PENDING</div>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Team Assignment Dropdown */}
+                                                            <select
+                                                                value={p.team_id || ''}
+                                                                onChange={(e) => manualAssignTeam(p.id, e.target.value)}
+                                                                style={{
+                                                                    background: '#0a0a0a',
+                                                                    border: p.team_id ? '2px solid var(--primary)' : '1px solid rgba(255,255,255,0.1)',
+                                                                    color: p.team_id ? '#fff' : '#666',
+                                                                    fontSize: '0.7rem',
+                                                                    padding: '5px',
+                                                                    borderRadius: '6px',
+                                                                    width: '130px',
+                                                                    fontWeight: 700,
+                                                                    outline: 'none',
+                                                                    cursor: 'pointer',
+                                                                    textAlign: 'center'
+                                                                }}
+                                                            >
+                                                                <option value="" style={{ color: '#666' }}>-- Assign Team --</option>
+                                                                {teams.map(t => (
+                                                                    <option key={t.id} value={t.id}>{t.name}</option>
+                                                                ))}
+                                                            </select>
                                                         </div>
                                                     </td>
                                                     <td style={tdStyle}>
