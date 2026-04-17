@@ -44,9 +44,9 @@ export default function MatchScorecard({ matchId, forcedTeamId }: { matchId: str
         const fetchData = async () => {
             const [scoresRes, statsRes, eventsRes, innRes, matchRes] = await Promise.all([
                 supabase.from('team_scores').select('*, teams(name, captain_email)').eq('match_id', matchId),
-                supabase.from('player_match_stats').select('*, players:player_id(*)').eq('match_id', matchId),
+                supabase.from('player_match_stats').select('*, players:players!player_id(*)').eq('match_id', matchId),
                 supabase.from('match_events').select('*, batsman:players!batsman_id(*), bowler:players!bowler_id(*)').eq('match_id', matchId).order('created_at', { ascending: false }).limit(10),
-                supabase.from('innings').select('*').eq('match_id', matchId).order('innings_number', { ascending: true }),
+                supabase.from('innings').select('*, striker:players!striker_id(*), bowler:players!bowler_id(*)').eq('match_id', matchId).order('innings_number', { ascending: true }),
                 supabase.from('matches').select('*, team1:teams!team1_id(*), team2:teams!team2_id(*)').eq('id', matchId).single()
             ]);
 
@@ -166,9 +166,12 @@ export default function MatchScorecard({ matchId, forcedTeamId }: { matchId: str
                                         </thead>
                                         <tbody>
                                             {playerStats
-                                                .filter(ps => ps.players?.team_id === ts.team_id && ((ps.balls || 0) > 0 || (ps.runs || 0) > 0))
-                                                .sort((a, b) => (b.runs || 0) - (a.runs || 0))
-                                                .map(ps => (
+                                                .filter(ps => ps.players?.team_id === ts.team_id && ((ps.balls_faced || ps.balls || 0) > 0 || (ps.runs_scored || ps.runs || 0) > 0))
+                                                .sort((a, b) => (b.runs_scored || b.runs || 0) - (a.runs_scored || a.runs || 0))
+                                                .map(ps => {
+                                                    const r = ps.runs_scored !== undefined ? ps.runs_scored : (ps.runs || 0);
+                                                    const b = ps.balls_faced !== undefined ? ps.balls_faced : (ps.balls || 0);
+                                                    return (
                                                 <tr key={ps.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', background: (currentInnings?.striker_id === ps.player_id) ? 'rgba(255,215,0,0.03)' : 'transparent' }}>
                                                     <td style={{ padding: '12px 10px', fontWeight: 700, fontSize: '0.9rem' }}>
                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -179,13 +182,13 @@ export default function MatchScorecard({ matchId, forcedTeamId }: { matchId: str
                                                             {(currentInnings?.striker_id === ps.player_id) && <span style={{ color: 'var(--primary)' }}>*</span>}
                                                         </div>
                                                     </td>
-                                                    <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 900, color: 'var(--primary)', fontSize: '1rem' }}>{ps.runs || 0}</td>
-                                                    <td style={{ padding: '12px 10px', textAlign: 'right', color: '#888', fontSize: '0.96rem' }}>{ps.balls || 0}</td>
+                                                    <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 900, color: 'var(--primary)', fontSize: '1rem' }}>{r}</td>
+                                                    <td style={{ padding: '12px 10px', textAlign: 'right', color: '#888', fontSize: '0.96rem' }}>{b}</td>
                                                     <td style={{ padding: '12px 10px', textAlign: 'right', fontSize: '0.9rem' }}>{ps.fours || 0}</td>
                                                     <td style={{ padding: '12px 10px', textAlign: 'right', fontSize: '0.9rem' }}>{ps.sixes || 0}</td>
-                                                    <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 700, fontSize: '0.85rem' }}>{(ps.balls || 0) > 0 ? (((ps.runs || 0) / ps.balls) * 100).toFixed(1) : '0.0'}</td>
+                                                    <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 700, fontSize: '0.85rem' }}>{b > 0 ? ((r / b) * 100).toFixed(1) : '0.0'}</td>
                                                 </tr>
-                                            ))}
+                                            );})}
                                         </tbody>
                                     </table>
                                 </div>
@@ -208,14 +211,20 @@ export default function MatchScorecard({ matchId, forcedTeamId }: { matchId: str
                                             </thead>
                                             <tbody>
                                                 {playerStats
-                                                    .filter(ps => ps.players?.team_id === oppositeTeam.team_id && ((ps.overs || 0) > 0 || (ps.wickets || 0) > 0 || (ps.runs_given || 0) > 0))
+                                                    .filter(ps => ps.players?.team_id === oppositeTeam.team_id && ((ps.overs_bowled || ps.overs || 0) > 0 || (ps.wickets_taken || ps.wickets || 0) > 0 || (ps.runs_conceded || ps.runs_given || 0) > 0))
                                                     .sort((a, b) => {
-                                                        if ((b.wickets || 0) !== (a.wickets || 0)) {
-                                                            return (b.wickets || 0) - (a.wickets || 0);
-                                                        }
-                                                        return (b.overs || 0) - (a.overs || 0);
+                                                        const wA = a.wickets_taken !== undefined ? a.wickets_taken : (a.wickets || 0);
+                                                        const wB = b.wickets_taken !== undefined ? b.wickets_taken : (b.wickets || 0);
+                                                        if (wB !== wA) return wB - wA;
+                                                        const oA = a.overs_bowled !== undefined ? a.overs_bowled : (a.overs || 0);
+                                                        const oB = b.overs_bowled !== undefined ? b.overs_bowled : (b.overs || 0);
+                                                        return oB - oA;
                                                     })
-                                                    .map(ps => (
+                                                    .map(ps => {
+                                                        const o = ps.overs_bowled !== undefined ? ps.overs_bowled : (ps.overs || 0);
+                                                        const rG = ps.runs_conceded !== undefined ? ps.runs_conceded : (ps.runs_given || 0);
+                                                        const w = ps.wickets_taken !== undefined ? ps.wickets_taken : (ps.wickets || 0);
+                                                        return (
                                                     <tr key={ps.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', background: (currentInnings?.bowler_id === ps.player_id) ? 'rgba(0,255,128,0.03)' : 'transparent' }}>
                                                         <td style={{ padding: '12px 10px', fontWeight: 700, fontSize: '0.9rem' }}>
                                                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -225,12 +234,12 @@ export default function MatchScorecard({ matchId, forcedTeamId }: { matchId: str
                                                                 )}
                                                             </div>
                                                         </td>
-                                                        <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 900, fontSize: '0.96rem' }}>{ps.overs || 0}</td>
-                                                        <td style={{ padding: '12px 10px', textAlign: 'right', color: '#ff4b4b', fontSize: '0.96rem' }}>{ps.runs_given || 0}</td>
-                                                        <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 900, color: '#00ff80', fontSize: '1rem' }}>{ps.wickets || 0}</td>
-                                                        <td style={{ padding: '12px 10px', textAlign: 'right', color: '#888', fontSize: '0.85rem' }}>{(ps.overs || 0) > 0 ? ((ps.runs_given || 0) / parseFloat(ps.overs.toString())).toFixed(2) : '0.00'}</td>
+                                                        <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 900, fontSize: '0.96rem' }}>{o}</td>
+                                                        <td style={{ padding: '12px 10px', textAlign: 'right', color: '#ff4b4b', fontSize: '0.96rem' }}>{rG}</td>
+                                                        <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 900, color: '#00ff80', fontSize: '1rem' }}>{w}</td>
+                                                        <td style={{ padding: '12px 10px', textAlign: 'right', color: '#888', fontSize: '0.85rem' }}>{o > 0 ? (rG / parseFloat(o.toString())).toFixed(2) : '0.00'}</td>
                                                     </tr>
-                                                ))}
+                                                );})}
                                             </tbody>
                                         </table>
                                     </div>

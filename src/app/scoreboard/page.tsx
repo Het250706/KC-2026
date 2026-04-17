@@ -31,9 +31,10 @@ function ScoreboardContent() {
     const [loading, setLoading] = useState(true);
     const [allMatches, setAllMatches] = useState<any[]>([]);
     const [matchFilter, setMatchFilter] = useState<'all' | 'live' | 'completed'>('all');
-    const [activeView, setActiveView] = useState<'home' | 'live' | 'matches' | 'teams' | 'stats'>('home');
+    const [activeView, setActiveView] = useState<'home' | 'live' | 'matches' | 'teams' | 'stats' | 'points'>('home');
     const [tournamentStats, setTournamentStats] = useState<any[]>([]);
     const [teamsData, setTeamsData] = useState<any[]>([]);
+    const [pointsTable, setPointsTable] = useState<any[]>([]);
     const [selectedTeamForSquad, setSelectedTeamForSquad] = useState<any>(null);
     const [activeScorecardTeamId, setActiveScorecardTeamId] = useState<string | null>(null);
     const [historyMatch, setHistoryMatch] = useState<any>(null);
@@ -42,12 +43,84 @@ function ScoreboardContent() {
     // Sync view with URL
     useEffect(() => {
         const view = searchParams.get('view');
-        if (view === 'live' || view === 'matches' || view === 'teams' || view === 'stats') {
+        if (view === 'live' || view === 'matches' || view === 'teams' || view === 'stats' || view === 'points') {
             setActiveView(view as any);
         } else {
             setActiveView('home');
         }
     }, [searchParams]);
+
+    const convertOversToBalls = (overs: number) => {
+        const full = Math.floor(overs);
+        const rem = Math.round((overs - full) * 10);
+        return (full * 6) + rem;
+    };
+
+    const calculatePointsTable = (teamsList: any[], matchesList: any[], scoresList: any[]) => {
+        const stats = teamsList.map(t => ({
+            id: t.id,
+            name: t.name,
+            played: 0,
+            won: 0,
+            lost: 0,
+            pts: 0,
+            runsScored: 0,
+            oversFaced: 0,
+            runsConceded: 0,
+            oversBowled: 0,
+            nrr: 0
+        }));
+
+        matchesList.filter(m => m.status === 'completed').forEach(m => {
+            const team1 = stats.find(s => s.id === m.team1_id);
+            const team2 = stats.find(s => s.id === m.team2_id);
+            if (!team1 || !team2) return;
+
+            team1.played++;
+            team2.played++;
+
+            if (m.winner_team_id === m.team1_id) {
+                team1.won++;
+                team1.pts += 2;
+                team2.lost++;
+            } else if (m.winner_team_id === m.team2_id) {
+                team2.won++;
+                team2.pts += 2;
+                team1.lost++;
+            } else if (m.winner_team_id === null) {
+                team1.pts += 1;
+                team2.pts += 1;
+            }
+
+            const s1 = scoresList.find(s => s.match_id === m.id && s.team_id === m.team1_id);
+            const s2 = scoresList.find(s => s.match_id === m.id && s.team_id === m.team2_id);
+
+            if (s1 && s2) {
+                team1.runsScored += s1.runs || 0;
+                const ballsFaced1 = convertOversToBalls(s1.overs || 0);
+                team1.oversFaced += ballsFaced1 / 6;
+
+                team2.runsConceded += s1.runs || 0;
+                team2.oversBowled += ballsFaced1 / 6;
+
+                team2.runsScored += s2.runs || 0;
+                const ballsFaced2 = convertOversToBalls(s2.overs || 0);
+                team2.oversFaced += ballsFaced2 / 6;
+
+                team1.runsConceded += s2.runs || 0;
+                team1.oversBowled += ballsFaced2 / 6;
+            }
+        });
+
+        return stats.map(s => {
+            const rpoScored = s.oversFaced > 0 ? s.runsScored / s.oversFaced : 0;
+            const rpoConceded = s.oversBowled > 0 ? s.runsConceded / s.oversBowled : 0;
+            return {
+                ...s,
+                nrr: rpoScored - rpoConceded
+            };
+        }).sort((a, b) => b.pts - a.pts || b.nrr - a.nrr);
+    };
 
     const teams = ['AISHWARYAM', 'SHAURYAM', 'DIVYAM', 'GYANAM', 'ASTIKAYAM', 'DASHATVAM', 'SATYAM', 'DHAIRYAM'];
     const captains = [
@@ -96,7 +169,7 @@ function ScoreboardContent() {
 
             if (activeMatch) {
                 const results = await Promise.all([
-                    supabase.from('innings').select('*').eq('match_id', activeMatch.id).order('innings_number', { ascending: true }),
+                    supabase.from('innings').select('*, striker:players!striker_id(*), bowler:players!bowler_id(*)').eq('match_id', activeMatch.id).order('innings_number', { ascending: true }),
                     supabase.from('player_match_stats').select('*, players(*)').eq('match_id', activeMatch.id),
                     supabase.from('matches').select('*, team1:teams!team1_id(*), team2:teams!team2_id(*)').eq('status', 'upcoming').order('created_at', { ascending: true }).limit(1).maybeSingle()
                 ]);
@@ -145,6 +218,13 @@ function ScoreboardContent() {
                     players: pData.filter(p => p.team_id === team.id)
                 }));
                 setTeamsData(teamsWithPlayers);
+
+                // Fetch team scores for points table
+                const { data: allTeamScores } = await supabase.from('team_scores').select('*');
+                if (matchesList && allTeamScores) {
+                    const table = calculatePointsTable(tRes.data, matchesList, allTeamScores);
+                    setPointsTable(table);
+                }
             }
 
             if (sRes.data) setTournamentStats(sRes.data);
@@ -225,9 +305,10 @@ function ScoreboardContent() {
                         {[
                             { id: 'home', icon: Activity, label: 'HOME' },
                             { id: 'live', icon: Zap, label: 'LIVE' },
+                            { id: 'points', icon: Trophy, label: 'TABLE' },
                             { id: 'matches', icon: Swords, label: 'MATCHES' },
                             { id: 'teams', icon: Users, label: 'TEAMS' },
-                            { id: 'stats', icon: Trophy, label: 'STATS' }
+                            { id: 'stats', icon: TrendingUp, label: 'STATS' }
                         ].map(btn => (
                             <button
                                 key={btn.id}
@@ -327,6 +408,67 @@ function ScoreboardContent() {
 
                         <div style={{ height: '1px', background: 'linear-gradient(90deg, transparent, rgba(255,215,0,0.3), transparent)', width: '300px', margin: '0 auto 20px' }} />
                     </div>
+                )}
+
+                {activeView === 'points' && (
+                    <section className="fade-in">
+                        <div className="section-header" style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '40px' }}>
+                            <div style={{ padding: '15px', background: 'rgba(255,215,0,0.1)', borderRadius: '18px', flexShrink: 0 }}>
+                                <Trophy size={36} color="var(--primary)" />
+                            </div>
+                            <div>
+                                <h2 className="responsive-title" style={{ fontSize: 'clamp(1.5rem, 6vw, 2.5rem)', fontWeight: 950, letterSpacing: '1px', margin: 0, lineHeight: 1.2 }}>POINTS TABLE</h2>
+                                <p style={{ color: 'var(--text-muted)', fontWeight: 800, letterSpacing: '1.5px', fontSize: 'clamp(0.7rem, 2vw, 0.9rem)', marginTop: '4px' }}>TOURNAMENT STANDINGS</p>
+                            </div>
+                        </div>
+
+                        <div className="glass premium" style={{ borderRadius: '30px', overflow: 'hidden', border: '1px solid rgba(255,215,0,0.1)' }}>
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                                    <thead>
+                                        <tr style={{ background: 'var(--primary)', color: '#000' }}>
+                                            <th style={{ padding: '15px 20px', textAlign: 'center', fontWeight: 900 }}>POS</th>
+                                            <th style={{ padding: '15px 20px', textAlign: 'left', fontWeight: 900 }}>TEAM</th>
+                                            <th style={{ padding: '15px 20px', textAlign: 'center', fontWeight: 900 }}>P</th>
+                                            <th style={{ padding: '15px 20px', textAlign: 'center', fontWeight: 900 }}>W</th>
+                                            <th style={{ padding: '15px 20px', textAlign: 'center', fontWeight: 900 }}>L</th>
+                                            <th style={{ padding: '15px 20px', textAlign: 'center', fontWeight: 900 }}>PTS</th>
+                                            <th style={{ padding: '15px 20px', textAlign: 'right', fontWeight: 900 }}>NRR</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {pointsTable.map((t, idx) => (
+                                            <tr key={t.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', background: idx % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
+                                                <td style={{ padding: '18px 20px', textAlign: 'center', fontWeight: 900 }}>{idx + 1}</td>
+                                                <td style={{ padding: '18px 20px', textAlign: 'left' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                                        <div style={{ width: '30px', height: '30px', background: 'rgba(255,215,0,0.1)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                            <img src="/logo.png" style={{ width: '18px' }} alt="" />
+                                                        </div>
+                                                        <span style={{ fontWeight: 900, letterSpacing: '0.5px' }}>{t.name.toUpperCase()}</span>
+                                                    </div>
+                                                </td>
+                                                <td style={{ padding: '18px 20px', textAlign: 'center', fontWeight: 800 }}>{t.played}</td>
+                                                <td style={{ padding: '18px 20px', textAlign: 'center', fontWeight: 800 }}>{t.won}</td>
+                                                <td style={{ padding: '18px 20px', textAlign: 'center', fontWeight: 800 }}>{t.lost}</td>
+                                                <td style={{ padding: '18px 20px', textAlign: 'center', fontWeight: 950, color: 'var(--primary)' }}>{t.pts}</td>
+                                                <td style={{ padding: '18px 20px', textAlign: 'right', fontWeight: 900, color: t.nrr >= 0 ? '#00ff80' : '#ff4b4b' }}>
+                                                    {t.nrr >= 0 ? '+' : ''}{t.nrr.toFixed(3)}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {pointsTable.length === 0 && (
+                                            <tr>
+                                                <td colSpan={7} style={{ padding: '60px', textAlign: 'center', color: 'rgba(255,255,255,0.2)', fontWeight: 800 }}>
+                                                    NO DATA AVAILABLE YET
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
                 )}
 
                 {activeView === 'stats' && (
@@ -873,13 +1015,42 @@ function ScoreboardContent() {
 function ScoreDisplay({ inn }: { inn: any }) {
     if (!inn) return <div style={{ fontSize: '0.9rem', fontWeight: 950, color: 'rgba(255,255,255,0.05)' }}>YET TO BAT</div>;
     return (
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: '10px' }}>
-            <div style={{ fontSize: '2rem', fontWeight: 950, letterSpacing: '-1px', lineHeight: 1 }}>
-                {inn.runs}<span style={{ color: 'var(--primary)', opacity: 0.8 }}>/</span>{inn.wickets}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: '10px' }}>
+                <div style={{ fontSize: '2rem', fontWeight: 950, letterSpacing: '-1px', lineHeight: 1 }}>
+                    {inn.runs}<span style={{ color: 'var(--primary)', opacity: 0.8 }}>/</span>{inn.wickets}
+                </div>
+                <div style={{ fontSize: '0.8rem', fontWeight: 900, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.5px' }}>
+                    {(inn.overs || 0).toFixed(1)} <span style={{ fontSize: '0.6rem' }}>ov</span>
+                </div>
             </div>
-            <div style={{ fontSize: '0.8rem', fontWeight: 900, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.5px' }}>
-                {(inn.overs || 0).toFixed(1)} <span style={{ fontSize: '0.6rem' }}>ov</span>
-            </div>
+            
+            {!inn.is_completed && (inn.striker || inn.bowler) && (
+                <div style={{ 
+                    display: 'flex', 
+                    gap: '12px', 
+                    fontSize: '0.65rem', 
+                    fontWeight: 900, 
+                    color: 'rgba(255,255,255,0.5)', 
+                    textTransform: 'uppercase', 
+                    letterSpacing: '1px',
+                    background: 'rgba(255,255,255,0.03)',
+                    padding: '4px 12px',
+                    borderRadius: '10px',
+                    border: '1px solid rgba(255,255,255,0.05)'
+                }}>
+                    {inn.striker && (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <span style={{ color: 'var(--primary)' }}>🏏</span> {inn.striker.first_name}
+                        </span>
+                    )}
+                    {inn.bowler && (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <span style={{ color: '#00ff80' }}>🥎</span> {inn.bowler.first_name}
+                        </span>
+                    )}
+                </div>
+            )}
         </div>
     );
 }
