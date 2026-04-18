@@ -1,7 +1,3 @@
-'use client';
-
-import { Zap } from 'lucide-react';
-
 export default function AdminLayout({
     children,
 }: {
@@ -9,11 +5,9 @@ export default function AdminLayout({
 }) {
     return (
         <div className="admin-root" style={{ position: 'relative' }}>
-
             {children}
-            <style jsx global>{`
+            <style dangerouslySetInnerHTML={{ __html: `
                 :root {
-                
                     --primary: #FFD700;
                     --primary-glow: rgba(255, 215, 0, 0.4);
                     --border: rgba(255, 255, 255, 0.1);
@@ -53,7 +47,7 @@ export default function AdminLayout({
                     cursor: pointer;
                     transition: all 0.3s ease;
                 }
-            `}</style>
+            `}} />
         </div>
     );
 }

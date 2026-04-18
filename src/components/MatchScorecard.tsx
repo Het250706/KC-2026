@@ -9,6 +9,7 @@ export default function MatchScorecard({ matchId, forcedTeamId }: { matchId: str
     const [matchDetails, setMatchDetails] = useState<any>(null);
     const [playerStats, setPlayerStats] = useState<any[]>([]);
     const [matchEvents, setMatchEvents] = useState<any[]>([]);
+    const [matchPlayers, setMatchPlayers] = useState<any[]>([]);
     const [currentInnings, setCurrentInnings] = useState<any>(null);
     const [activeTeamTab, setActiveTeamTab] = useState<string | null>(forcedTeamId || null);
     const [loading, setLoading] = useState(true);
@@ -42,15 +43,17 @@ export default function MatchScorecard({ matchId, forcedTeamId }: { matchId: str
         if (!matchId) return;
 
         const fetchData = async () => {
-            const [scoresRes, statsRes, eventsRes, innRes, matchRes] = await Promise.all([
+            const [scoresRes, statsRes, eventsRes, innRes, matchRes, playersRes] = await Promise.all([
                 supabase.from('team_scores').select('*, teams(name, captain_email)').eq('match_id', matchId),
                 supabase.from('player_match_stats').select('*, players:players!player_id(*)').eq('match_id', matchId),
                 supabase.from('match_events').select('*, batsman:players!batsman_id(*), bowler:players!bowler_id(*)').eq('match_id', matchId).order('created_at', { ascending: false }).limit(10),
                 supabase.from('innings').select('*, striker:players!striker_id(*), bowler:players!bowler_id(*)').eq('match_id', matchId).order('innings_number', { ascending: true }),
-                supabase.from('matches').select('*, team1:teams!team1_id(*), team2:teams!team2_id(*)').eq('id', matchId).single()
+                supabase.from('matches').select('*, team1:teams!team1_id(*), team2:teams!team2_id(*)').eq('id', matchId).single(),
+                supabase.from('match_players').select('*').eq('match_id', matchId)
             ]);
 
             if (matchRes.data) setMatchDetails(matchRes.data);
+            if (playersRes.data) setMatchPlayers(playersRes.data);
             if (scoresRes.data) {
                 let scores = scoresRes.data;
                 const allInnings = innRes.data || [];
@@ -60,7 +63,7 @@ export default function MatchScorecard({ matchId, forcedTeamId }: { matchId: str
                     const teams = [m.team1, m.team2];
                     scores = teams.map(t => {
                         const existing = scores.find(s => s.team_id === t.id);
-                        const inn = allInnings.find(i => i.batting_team_id === t.id);
+                        const inn = allInnings.length > 0 ? allInnings.find(i => i.batting_team_id === t.id) : null;
                         return existing || { 
                             team_id: t.id, 
                             teams: t, 
@@ -91,20 +94,9 @@ export default function MatchScorecard({ matchId, forcedTeamId }: { matchId: str
         // REAL-TIME SUBSCRIPTIONS
         const channel = supabase.channel(`scorecard_${matchId}`)
             .on('postgres_changes', { event: '*', table: 'team_scores', schema: 'public', filter: `match_id=eq.${matchId}` }, (payload: any) => {
-                setTeamScores(prev => {
-                    const index = prev.findIndex(s => s.id === (payload.new as any).id);
-                    if (index > -1) {
-                        const updated = [...prev];
-                        updated[index] = { ...updated[index], ...payload.new };
-                        return updated;
-                    }
-                    return [...prev, payload.new];
-                });
+                fetchData();
             })
-            .on('postgres_changes', { event: '*', table: 'player_match_stats', schema: 'public', filter: `match_id=eq.${matchId}` }, (payload: any) => {
-                fetchData(); // Simplest way to keep players & their relations synced
-            })
-            .on('postgres_changes', { event: 'INSERT', table: 'match_events', schema: 'public', filter: `match_id=eq.${matchId}` }, (payload: any) => {
+            .on('postgres_changes', { event: '*', table: 'match_events', schema: 'public', filter: `match_id=eq.${matchId}` }, (payload: any) => {
                 fetchData();
             })
             .on('postgres_changes', { event: '*', table: 'innings', schema: 'public', filter: `match_id=eq.${matchId}` }, (payload: any) => {
@@ -119,21 +111,16 @@ export default function MatchScorecard({ matchId, forcedTeamId }: { matchId: str
 
     if (loading) return <div className="p-10 text-center animate-pulse">Loading Live Scorecard...</div>;
 
-    const currentTeamScore = teamScores.find(ts => ts.team_id === activeTeamTab);
-    
-    // Cricbuzz Style: Identify active players from match events or innings
-    const activeStriker = playerStats.find(ps => ps.player_id === (matchEvents[0]?.batsman_id));
-    const activeBowler = playerStats.find(ps => ps.player_id === (matchEvents[0]?.bowler_id));
-
     return (
         <div className="scorecard-wrapper" style={{ color: '#fff' }}>
 
             {/* Scorecard Sections for each team */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '40px' }}>
                 {teamScores.map(ts => {
-                    const isBattingTeam = ts.team_id === activeTeamTab; // Keep this logic for highlighting current live team if needed, but we show both
-                    const oppositeTeam = teamScores.find(other => other.team_id !== ts.team_id);
-                    const teamName = ts.teams?.name || 'Unknown Team';
+                    // Use matchDetails for accurate opposite team detection
+                    const oppositeTeamId = matchDetails?.team1_id === ts.team_id ? matchDetails?.team2_id : matchDetails?.team1_id;
+                    const oppositeTeam = teamScores.find(other => other.team_id === oppositeTeamId) || { team_id: oppositeTeamId };
+                    const teamName = ts.teams?.name || (matchDetails?.team1_id === ts.team_id ? matchDetails?.team1?.name : matchDetails?.team2?.name) || 'Unknown Team';
                     
                     return (
                         <div key={ts.team_id} className="team-innings-section">
@@ -165,8 +152,12 @@ export default function MatchScorecard({ matchId, forcedTeamId }: { matchId: str
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {playerStats
-                                                .filter(ps => ps.players?.team_id === ts.team_id && ((ps.balls_faced || ps.balls || 0) > 0 || (ps.runs_scored || ps.runs || 0) > 0))
+                                             {playerStats
+                                                .filter(ps => {
+                                                    const isMatchTeam = matchPlayers.some(mp => mp.player_id === ps.player_id && mp.team_id === ts.team_id);
+                                                    const hasActivity = (ps.runs_scored || ps.runs || 0) > 0 || (ps.balls_faced || ps.balls || 0) > 0;
+                                                    return isMatchTeam && hasActivity;
+                                                })
                                                 .sort((a, b) => (b.runs_scored || b.runs || 0) - (a.runs_scored || a.runs || 0))
                                                 .map(ps => {
                                                     const r = ps.runs_scored !== undefined ? ps.runs_scored : (ps.runs || 0);
@@ -210,8 +201,12 @@ export default function MatchScorecard({ matchId, forcedTeamId }: { matchId: str
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {playerStats
-                                                    .filter(ps => ps.players?.team_id === oppositeTeam.team_id && ((ps.overs_bowled || ps.overs || 0) > 0 || (ps.wickets_taken || ps.wickets || 0) > 0 || (ps.runs_conceded || ps.runs_given || 0) > 0))
+                                                 {playerStats
+                                                    .filter(ps => {
+                                                        const isMatchOppositeTeam = matchPlayers.some(mp => mp.player_id === ps.player_id && mp.team_id === oppositeTeam.team_id);
+                                                        const hasActivity = (ps.overs_bowled || ps.overs || 0) > 0 || (ps.wickets_taken || ps.wickets || 0) > 0;
+                                                        return isMatchOppositeTeam && hasActivity;
+                                                    })
                                                     .sort((a, b) => {
                                                         const wA = a.wickets_taken !== undefined ? a.wickets_taken : (a.wickets || 0);
                                                         const wB = b.wickets_taken !== undefined ? b.wickets_taken : (b.wickets || 0);

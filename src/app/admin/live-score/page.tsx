@@ -64,6 +64,9 @@ function AdminLiveScoreContent() {
     const [firstInningsRuns, setFirstInningsRuns] = useState<number | null>(null);
     const [scoringTab, setScoringTab] = useState<'live' | 'team_a' | 'team_b'>('live');
     const [matchEvents, setMatchEvents] = useState<any[]>([]);
+    const [potmList, setPotmList] = useState<any[]>([]);
+    const [showPotmModal, setShowPotmModal] = useState(false);
+    const [selectedPotmId, setSelectedPotmId] = useState('');
 
     // Stats State
     const [tournamentStats, setTournamentStats] = useState<any[]>([]);
@@ -120,8 +123,40 @@ function AdminLiveScoreContent() {
     };
 
     const fetchTournamentStats = async () => {
-        const { data } = await supabase.from('tournament_player_stats').select('*').order('total_runs', { ascending: false });
-        if (data) setTournamentStats(data);
+        const { data: rawStats } = await supabase.from('player_match_stats').select('*, players(*)');
+        const { data: teamsRes } = await supabase.from('teams').select('id, name');
+        
+        if (rawStats && teamsRes) {
+            const playersMap = new Map();
+            rawStats.forEach((stat: any) => {
+                const pid = stat.player_id;
+                if (!playersMap.has(pid)) {
+                    playersMap.set(pid, {
+                        player_id: pid,
+                        first_name: stat.players?.first_name || 'Unknown',
+                        last_name: stat.players?.last_name || '',
+                        team_id: stat.players?.team_id,
+                        photo_url: stat.players?.photo_url || stat.players?.photo,
+                        total_runs: 0,
+                        total_wickets: 0,
+                        pot_score: 0
+                    });
+                }
+                const p = playersMap.get(pid);
+                p.total_runs += Number(stat.runs_scored || stat.runs || 0);
+                p.total_wickets += Number(stat.wickets_taken || stat.wickets || 0);
+                p.pot_score = p.total_runs + (p.total_wickets * 25);
+            });
+
+            const aggregated = Array.from(playersMap.values()).map(p => {
+                const team = teamsRes.find(t => t.id === p.team_id);
+                return { 
+                    ...p, 
+                    team_name: team?.name || 'No Team'
+                };
+            }).sort((a: any, b: any) => (b.pot_score || 0) - (a.pot_score || 0));
+            setTournamentStats(aggregated);
+        }
     };
 
     const fetchMatches = async () => {
@@ -567,6 +602,22 @@ function AdminLiveScoreContent() {
                 await supabase.from('innings').update({ is_completed: true }).eq('id', currentInnings.id);
 
                 alert(resultMessage);
+                
+                // 3. Fetch Top Performers for POTM
+                const { data: stats } = await supabase
+                    .from('player_match_stats')
+                    .select('*, players(*)')
+                    .eq('match_id', activeMatch.id);
+                
+                if (stats) {
+                    const sorted = stats.map((s: any) => ({
+                        ...s,
+                        score: (s.runs_scored || 0) + ((s.wickets_taken || 0) * 25)
+                    })).sort((a: any, b: any) => b.score - a.score);
+                    setPotmList(sorted);
+                    setShowPotmModal(true);
+                }
+
                 await Promise.all([
                     fetchMatches(),
                     fetchTournamentStats()
@@ -661,12 +712,20 @@ function AdminLiveScoreContent() {
                             <div style={{ fontSize: '0.65rem', fontWeight: 950, color: 'var(--text-muted)', letterSpacing: '2px', textTransform: 'uppercase' }}>BEST BATSMAN</div>
                             <div style={{ minHeight: '60px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
                                 {(() => {
-                                    const best = [...tournamentStats].sort((a,b) => (b.total_runs || 0) - (a.total_runs || 0))[0];
-                                    if (best && best.total_runs > 0) {
+                                    const best = [...tournamentStats]
+                                        .filter(s => (s.total_runs || 0) > 0)
+                                        .sort((a,b) => {
+                                            if ((b.total_runs || 0) !== (a.total_runs || 0)) return (b.total_runs || 0) - (a.total_runs || 0);
+                                            return (b.strike_rate || 0) - (a.strike_rate || 0);
+                                        })[0];
+                                    if (best) {
                                         return (
                                             <>
                                                 <div style={{ fontSize: '1rem', fontWeight: 950, color: '#fff', marginTop: '5px' }}>{best.first_name} {best.last_name}</div>
                                                 <div style={{ fontSize: '0.85rem', fontWeight: 900, color: 'var(--primary)' }}>{best.total_runs} <span style={{ fontSize: '0.6rem', opacity: 0.6 }}>RUNS</span></div>
+                                                <div style={{ fontSize: '0.6rem', fontWeight: 700, color: 'rgba(255,255,255,0.3)', marginTop: '2px' }}>
+                                                    SR: {(best.total_balls_faced || 0) > 0 ? (((best.total_runs || 0) / best.total_balls_faced) * 100).toFixed(1) : (best.strike_rate || '0.0')}
+                                                </div>
                                             </>
                                         );
                                     }
@@ -692,12 +751,20 @@ function AdminLiveScoreContent() {
                             <div style={{ fontSize: '0.65rem', fontWeight: 950, color: 'var(--text-muted)', letterSpacing: '2px', textTransform: 'uppercase' }}>BEST BOWLER</div>
                             <div style={{ minHeight: '60px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
                                 {(() => {
-                                    const best = [...tournamentStats].sort((a,b) => (b.total_wickets || 0) - (a.total_wickets || 0))[0];
-                                    if (best && best.total_wickets > 0) {
+                                    const best = [...tournamentStats]
+                                        .filter(s => (s.total_wickets || 0) > 0)
+                                        .sort((a,b) => {
+                                            if ((b.total_wickets || 0) !== (a.total_wickets || 0)) return (b.total_wickets || 0) - (a.total_wickets || 0);
+                                            return (a.economy || 0) - (b.economy || 0);
+                                        })[0];
+                                    if (best) {
                                         return (
                                             <>
                                                 <div style={{ fontSize: '1rem', fontWeight: 950, color: '#fff', marginTop: '5px' }}>{best.first_name} {best.last_name}</div>
                                                 <div style={{ fontSize: '0.85rem', fontWeight: 900, color: '#00ff80' }}>{best.total_wickets} <span style={{ fontSize: '0.6rem', opacity: 0.6 }}>WICKETS</span></div>
+                                                <div style={{ fontSize: '0.6rem', fontWeight: 700, color: 'rgba(255,255,255,0.3)', marginTop: '2px' }}>
+                                                    ECON: {(best.total_overs_bowled || 0) > 0 ? ((best.total_runs_conceded || 0) / best.total_overs_bowled).toFixed(2) : (best.economy || '0.00')}
+                                                </div>
                                             </>
                                         );
                                     }
@@ -824,7 +891,7 @@ function AdminLiveScoreContent() {
                                                 <th style={{ padding: '20px' }}>TEAM</th>
                                                 <th style={{ padding: '20px' }}>RUNS</th>
                                                 <th style={{ padding: '20px' }}>WICKETS</th>
-                                                <th style={{ padding: '20px' }}>POT SCORE</th>
+                                                <th style={{ padding: '20px', textAlign: 'right' }}>POT SCORE (R + W*25)</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -842,7 +909,9 @@ function AdminLiveScoreContent() {
                                                     <td style={{ padding: '15px 20px', color: 'var(--primary)', fontWeight: 950, fontSize: '0.8rem' }}>{s.team_name?.toUpperCase() || '-'}</td>
                                                     <td style={{ padding: '15px 20px', fontWeight: 900 }}>{s.total_runs}</td>
                                                     <td style={{ padding: '15px 20px', fontWeight: 900, color: '#00ff80' }}>{s.total_wickets}</td>
-                                                    <td style={{ padding: '15px 20px', fontWeight: 900, color: 'var(--primary)' }}>{Math.round(s.pot_score)}</td>
+                                                    <td style={{ padding: '15px 20px', fontWeight: 950, color: 'var(--primary)', textAlign: 'right', fontSize: '1.2rem' }}>
+                                                        {Math.round(Number(s.total_runs || 0) + (Number(s.total_wickets || 0) * 25))}
+                                                    </td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -1262,6 +1331,88 @@ function AdminLiveScoreContent() {
                                 <div style={{ display: 'flex', gap: '15px' }}>
                                     <button onClick={() => setShowWicketModal(false)} className="btn-secondary" style={{ flex: 1 }}>CANCEL</button>
                                     <button onClick={() => recordBall(0, true)} className="btn-primary" style={{ flex: 2 }}>CONFIRM WICKET</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    {/* POTM Modal */}
+                    {showPotmModal && (
+                        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+                            <div className="glass" style={{ width: '100%', maxWidth: '600px', padding: '40px', borderRadius: '40px', textAlign: 'center' }}>
+                                <Trophy size={64} color="var(--primary)" style={{ marginBottom: '20px', margin: '0 auto' }} />
+                                <h2 style={{ fontSize: '2rem', fontWeight: 950, marginBottom: '10px' }}>PLAYER OF THE MATCH</h2>
+                                <p style={{ color: 'var(--text-muted)', marginBottom: '30px', fontWeight: 800 }}>Top Performers based on Batting & Bowling</p>
+                                
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', maxHeight: '400px', overflowY: 'auto', padding: '10px' }}>
+                                    {potmList.slice(0, 5).map((p: any) => (
+                                        <button 
+                                            key={p.player_id || p.id}
+                                            onClick={() => setSelectedPotmId(p.player_id || p.id)}
+                                            style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'space-between',
+                                                padding: '20px',
+                                                borderRadius: '25px',
+                                                background: selectedPotmId === (p.player_id || p.id) ? 'rgba(255,215,0,0.2)' : 'rgba(255,255,255,0.05)',
+                                                border: selectedPotmId === (p.player_id || p.id) ? '2px solid var(--primary)' : '1px solid var(--border)',
+                                                color: '#fff',
+                                                cursor: 'pointer',
+                                                transition: 'all 0.3s',
+                                                boxShadow: selectedPotmId === (p.player_id || p.id) ? '0 0 20px rgba(255,215,0,0.2)' : 'none'
+                                            }}
+                                        >
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '15px', textAlign: 'left' }}>
+                                                <div style={{ width: '40px', height: '40px', borderRadius: '10px', overflow: 'hidden', background: '#222', border: '1px solid var(--border)' }}>
+                                                    <img src={fixPhotoUrl(p.players?.photo_url || p.players?.photo, p.players?.first_name)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                </div>
+                                                <div>
+                                                    <div style={{ fontWeight: 950, fontSize: '1.1rem', color: selectedPotmId === (p.player_id || p.id) ? 'var(--primary)' : '#fff' }}>{p.players?.first_name} {p.players?.last_name}</div>
+                                                    <div style={{ fontSize: '0.75rem', opacity: 0.8, fontWeight: 800 }}>{p.runs_scored || 0} Runs • {p.wickets_taken || 0} Wickets</div>
+                                                </div>
+                                            </div>
+                                            <div style={{ fontWeight: 950, fontSize: '1.2rem', color: 'var(--primary)' }}>{p.score} <span style={{ fontSize: '0.6rem', opacity: 0.6 }}>PTS</span></div>
+                                        </button>
+                                    ))}
+                                </div>
+
+                                <div style={{ marginTop: '30px', display: 'flex', gap: '15px' }}>
+                                    <button 
+                                        onClick={() => {
+                                            setShowPotmModal(false);
+                                            setView('matches');
+                                        }}
+                                        className="btn-secondary" 
+                                        style={{ flex: 1, padding: '20px', fontWeight: 900 }}
+                                    >SKIP</button>
+                                    <button 
+                                        disabled={!selectedPotmId || loading}
+                                        onClick={async () => {
+                                            try {
+                                                setLoading(true);
+                                                const { error } = await supabase.from('matches').update({
+                                                    player_of_the_match_id: selectedPotmId
+                                                }).eq('id', activeMatch.id);
+                                                
+                                                if (error) {
+                                                    console.error('POTM_UPDATE_ERROR:', error);
+                                                    alert(`Error: ${error.message}. Make sure the SQL column is added.`);
+                                                } else {
+                                                    alert('✅ Player of the Match updated successfully!');
+                                                    setShowPotmModal(false);
+                                                    setView('matches');
+                                                }
+                                            } catch (err: any) {
+                                                alert(err.message);
+                                            } finally {
+                                                setLoading(false);
+                                            }
+                                        }}
+                                        className="btn-primary" 
+                                        style={{ flex: 2, padding: '20px', fontWeight: 950, opacity: selectedPotmId ? 1 : 0.5, boxShadow: selectedPotmId ? '0 0 30px var(--primary-glow)' : 'none' }}
+                                    >
+                                        {loading ? <Loader2 className="rotate" /> : 'CONFIRM WINNER'}
+                                    </button>
                                 </div>
                             </div>
                         </div>

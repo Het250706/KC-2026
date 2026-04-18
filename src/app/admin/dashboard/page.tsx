@@ -1,7 +1,5 @@
 'use client';
 
-export const dynamic = 'force-dynamic';
-
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import Navbar from '@/components/Navbar';
@@ -59,12 +57,12 @@ function AdminDashboardContent() {
 
     const fetchData = async () => {
         try {
-            const [playersRes, stateRes, teamsRes, regRes, statsRes, matchesRes] = await Promise.all([
+            const [playersRes, stateRes, teamsRes, regRes, rawStatsRes, matchesRes] = await Promise.all([
                 supabase.from('players').select('*').order('created_at', { ascending: false }),
                 supabase.from('auction_state').select('*').single(),
                 supabase.from('teams').select('*').order('name'),
                 supabase.from('registrations').select('id', { count: 'exact', head: true }).eq('is_pushed', false),
-                supabase.from('tournament_player_stats').select('*').order('total_runs', { ascending: false }),
+                supabase.from('player_match_stats').select('*, players(*)'),
                 supabase.from('matches').select('*').order('created_at', { ascending: false })
             ]);
 
@@ -72,7 +70,39 @@ function AdminDashboardContent() {
             if (stateRes.data) setAuctionState(stateRes.data);
             if (teamsRes.data) setTeams(teamsRes.data);
             if (regRes.count !== null) setRegistrationsCount(regRes.count);
-            if (statsRes.data) setTournamentStats(statsRes.data);
+            
+            // Manual Aggregation for Accuracy & Consistency
+            if (rawStatsRes.data && teamsRes.data) {
+                const playersMap = new Map();
+                rawStatsRes.data.forEach((stat: any) => {
+                    const pid = stat.player_id;
+                    if (!playersMap.has(pid)) {
+                        playersMap.set(pid, {
+                            player_id: pid,
+                            first_name: stat.players?.first_name || 'Unknown',
+                            last_name: stat.players?.last_name || '',
+                            team_id: stat.players?.team_id,
+                            photo_url: stat.players?.photo_url || stat.players?.photo,
+                            total_runs: 0,
+                            total_wickets: 0,
+                            pot_score: 0
+                        });
+                    }
+                    const p = playersMap.get(pid);
+                    p.total_runs += Number(stat.runs_scored || stat.runs || 0);
+                    p.total_wickets += Number(stat.wickets_taken || stat.wickets || 0);
+                    p.pot_score = p.total_runs + (p.total_wickets * 25);
+                });
+
+                const aggregated = Array.from(playersMap.values()).map(p => {
+                    const team = teamsRes.data?.find(t => t.id === p.team_id);
+                    return { 
+                        ...p, 
+                        team_name: team?.name || 'No Team'
+                    };
+                }).sort((a: any, b: any) => (b.pot_score || 0) - (a.pot_score || 0));
+                setTournamentStats(aggregated);
+            }
 
             // Combine unique slots from both tables for dropdowns
             const playerCats = playersRes.data?.map(p => p.category).filter(Boolean) || [];
@@ -103,6 +133,7 @@ function AdminDashboardContent() {
             .on('postgres_changes' as any, { event: '*', table: 'bids', schema: 'public' }, () => { if (isMounted) fetchData(); })
             .on('postgres_changes' as any, { event: '*', table: 'matches', schema: 'public' }, () => { if (isMounted) fetchData(); })
             .on('postgres_changes' as any, { event: '*', table: 'match_events', schema: 'public' }, () => { if (isMounted) fetchData(); })
+            .on('postgres_changes' as any, { event: '*', table: 'player_match_stats', schema: 'public' }, () => { if (isMounted) fetchData(); })
             .subscribe();
 
         return () => {
@@ -776,6 +807,63 @@ function AdminDashboardContent() {
                                 <div style={{ color: 'var(--primary)', fontWeight: 950, letterSpacing: '2px', fontSize: '0.8rem', marginBottom: '10px' }}>SYSTEM READY</div>
                                 <h2 style={{ fontSize: '1.2rem', fontWeight: 950 }}>CARD FLIP MODE ACTIVE</h2>
                                 <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '10px' }}>Manage your auction slots using the controls on the left.</p>
+                            </div>
+                    </div>
+                </div>
+
+                    {/* FULL TOURNAMENT STATISTICS (ADMIN ONLY) */}
+                    <div style={{ marginTop: '60px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '30px' }}>
+                            <div style={{ padding: '12px', background: 'rgba(255,215,0,0.1)', borderRadius: '15px' }}>
+                                <Trophy size={24} color="var(--primary)" />
+                            </div>
+                            <h2 style={{ fontSize: '1.8rem', fontWeight: 950, letterSpacing: '1px', margin: 0 }}>FULL TOURNAMENT STATISTICS</h2>
+                        </div>
+
+                        <div className="glass" style={{ borderRadius: '30px', overflow: 'hidden', padding: 0 }}>
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                                    <thead>
+                                        <tr style={{ background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid var(--border)' }}>
+                                            <th style={{ padding: '20px 30px', color: 'var(--primary)', fontWeight: 900, fontSize: '0.8rem', letterSpacing: '2px' }}>PLAYER</th>
+                                            <th style={{ padding: '20px 20px', color: 'var(--primary)', fontWeight: 900, fontSize: '0.8rem', letterSpacing: '2px' }}>TEAM</th>
+                                            <th style={{ padding: '20px 20px', color: 'var(--primary)', fontWeight: 900, fontSize: '0.8rem', letterSpacing: '2px', textAlign: 'center' }}>RUNS</th>
+                                            <th style={{ padding: '20px 20px', color: 'var(--primary)', fontWeight: 900, fontSize: '0.8rem', letterSpacing: '2px', textAlign: 'center' }}>WKTS</th>
+                                            <th style={{ padding: '20px 30px', color: 'var(--primary)', fontWeight: 900, fontSize: '0.8rem', letterSpacing: '2px', textAlign: 'right' }}>POT TOTAL (RUNS + WKTS * 25)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {tournamentStats.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>No statistics available yet.</td>
+                                            </tr>
+                                        ) : [...tournamentStats].sort((a,b) => (b.pot_score || 0) - (a.pot_score || 0)).map((s, idx) => (
+                                            <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
+                                                <td style={{ padding: '15px 30px' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                                                        <div style={{ width: '35px', height: '35px', borderRadius: '10px', background: '#111', overflow: 'hidden' }}>
+                                                            <img 
+                                                                src={fixPhotoUrl(s.photo_url || s.photo, s.first_name)} 
+                                                                style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                                                                alt="" 
+                                                                onError={(e) => { (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${s.first_name}`; }}
+                                                            />
+                                                        </div>
+                                                        <div style={{ fontWeight: 800 }}>{s.first_name} {s.last_name}</div>
+                                                    </div>
+                                                </td>
+                                                <td style={{ padding: '15px 20px' }}>
+                                                    <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#aaa' }}>{s.team_name?.toUpperCase() || 'NO TEAM'}</span>
+                                                </td>
+                                                <td style={{ padding: '15px 20px', textAlign: 'center', fontWeight: 900, color: 'var(--primary)' }}>{s.total_runs || 0}</td>
+                                                <td style={{ padding: '15px 20px', textAlign: 'center', fontWeight: 900, color: '#00ff80' }}>{s.total_wickets || 0}</td>
+                                                <td style={{ padding: '15px 30px', textAlign: 'right', fontWeight: 950 }}>
+                                                    <span style={{ fontSize: '1.2rem', color: 'var(--primary)' }}>{Math.round(Number(s.total_runs || 0) + (Number(s.total_wickets || 0) * 25))}</span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>

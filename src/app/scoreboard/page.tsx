@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useSearchParams } from 'next/navigation';
-import { Activity, Trophy, Swords, Target, Timer, TrendingUp, User, Star, Lock, Mail, AlertCircle, Loader2, Menu, X, ArrowLeft, Users, Zap } from 'lucide-react';
+import { Activity, Trophy, Swords, Target, Timer, TrendingUp, User, Star, Lock, Mail, AlertCircle, Loader2, Menu, X, ArrowLeft, Users, Zap, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fixPhotoUrl } from '@/lib/utils';
 import { useAuth } from '@/components/AuthProvider';
@@ -31,7 +31,7 @@ function ScoreboardContent() {
     const [loading, setLoading] = useState(true);
     const [allMatches, setAllMatches] = useState<any[]>([]);
     const [matchFilter, setMatchFilter] = useState<'all' | 'live' | 'completed'>('all');
-    const [activeView, setActiveView] = useState<'home' | 'live' | 'matches' | 'teams' | 'stats' | 'points'>('home');
+    const [activeView, setActiveView] = useState<'home' | 'live' | 'matches' | 'teams' | 'stats' | 'points'>('live');
     const [tournamentStats, setTournamentStats] = useState<any[]>([]);
     const [teamsData, setTeamsData] = useState<any[]>([]);
     const [pointsTable, setPointsTable] = useState<any[]>([]);
@@ -46,7 +46,7 @@ function ScoreboardContent() {
         if (view === 'live' || view === 'matches' || view === 'teams' || view === 'stats' || view === 'points') {
             setActiveView(view as any);
         } else {
-            setActiveView('home');
+            setActiveView('live');
         }
     }, [searchParams]);
 
@@ -57,9 +57,11 @@ function ScoreboardContent() {
     };
 
     const calculatePointsTable = (teamsList: any[], matchesList: any[], scoresList: any[]) => {
+        if (!teamsList || !Array.isArray(teamsList)) return [];
+
         const stats = teamsList.map(t => ({
             id: t.id,
-            name: t.name,
+            name: t.name || 'Unknown',
             played: 0,
             won: 0,
             lost: 0,
@@ -71,7 +73,9 @@ function ScoreboardContent() {
             nrr: 0
         }));
 
-        matchesList.filter(m => m.status === 'completed').forEach(m => {
+        if (!matchesList) return stats;
+
+        matchesList.filter(m => m && m.status === 'completed').forEach(m => {
             const team1 = stats.find(s => s.id === m.team1_id);
             const team2 = stats.find(s => s.id === m.team2_id);
             if (!team1 || !team2) return;
@@ -87,28 +91,32 @@ function ScoreboardContent() {
                 team2.won++;
                 team2.pts += 2;
                 team1.lost++;
-            } else if (m.winner_team_id === null) {
+            } else {
                 team1.pts += 1;
                 team2.pts += 1;
             }
 
-            const s1 = scoresList.find(s => s.match_id === m.id && s.team_id === m.team1_id);
-            const s2 = scoresList.find(s => s.match_id === m.id && s.team_id === m.team2_id);
+            if (!scoresList) return;
 
-            if (s1 && s2) {
-                team1.runsScored += s1.runs || 0;
-                const ballsFaced1 = convertOversToBalls(s1.overs || 0);
-                team1.oversFaced += ballsFaced1 / 6;
+            const inn1 = scoresList.find(s => s.match_id === m.id && s.batting_team_id === m.team1_id);
+            const inn2 = scoresList.find(s => s.match_id === m.id && s.batting_team_id === m.team2_id);
 
-                team2.runsConceded += s1.runs || 0;
-                team2.oversBowled += ballsFaced1 / 6;
+            if (inn1 && inn2) {
+                // Team 1 Stats
+                team1.runsScored += inn1.runs || 0;
+                const oversFaced1 = inn1.wickets >= 10 ? (m.max_overs || 8) : (inn1.overs || 0);
+                team1.oversFaced += convertOversToBalls(oversFaced1) / 6;
 
-                team2.runsScored += s2.runs || 0;
-                const ballsFaced2 = convertOversToBalls(s2.overs || 0);
-                team2.oversFaced += ballsFaced2 / 6;
+                team2.runsConceded += inn1.runs || 0;
+                team2.oversBowled += convertOversToBalls(oversFaced1) / 6;
 
-                team1.runsConceded += s2.runs || 0;
-                team1.oversBowled += ballsFaced2 / 6;
+                // Team 2 Stats
+                team2.runsScored += inn2.runs || 0;
+                const oversFaced2 = inn2.wickets >= 10 ? (m.max_overs || 8) : (inn2.overs || 0);
+                team2.oversFaced += convertOversToBalls(oversFaced2) / 6;
+
+                team1.runsConceded += inn2.runs || 0;
+                team1.oversBowled += convertOversToBalls(oversFaced2) / 6;
             }
         });
 
@@ -150,87 +158,173 @@ function ScoreboardContent() {
 
     const fetchScore = async () => {
         const now = Date.now();
-        if (now - lastFetchTime.current < 1500) {
+        if (now - lastFetchTime.current < 800) {
             if (fetchTimeout.current) clearTimeout(fetchTimeout.current);
-            fetchTimeout.current = setTimeout(fetchScore, 1500);
+            fetchTimeout.current = setTimeout(fetchScore, 800);
             return;
         }
         lastFetchTime.current = now;
 
         try {
-            const { data: liveMatch } = await supabase.from('matches')
-                .select('*, team1:teams!team1_id(*), team2:teams!team2_id(*)')
-                .eq('status', 'live')
-                .order('created_at', { ascending: false })
-                .maybeSingle();
+            let teamsWithPlayers: any[] = [];
+            // 1. Fetch Live Match
+            let liveMatch = null;
+            try {
+                const { data: liveMatches, error: liveMatchErr } = await supabase.from('matches')
+                    .select('*, team1:teams!team1_id(*), team2:teams!team2_id(*)')
+                    .eq('status', 'live')
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+                
+                if (liveMatchErr) console.error('Live Match Fetch Error:', liveMatchErr);
+                liveMatch = liveMatches?.[0] || null;
+                setMatch(liveMatch);
+            } catch (e) {
+                console.error('Live match fetch crash:', e);
+            }
 
-            setMatch(liveMatch);
+            // Auto-switch to live view if a match is active and no specific view is selected
+            if (liveMatch && !searchParams.get('view') && activeView === 'home') {
+                setActiveView('live');
+            }
+
             let activeMatch = liveMatch;
 
+            // 2. Fetch Match Details if there's an active match
             if (activeMatch) {
-                const results = await Promise.all([
-                    supabase.from('innings').select('*, striker:players!striker_id(*), bowler:players!bowler_id(*)').eq('match_id', activeMatch.id).order('innings_number', { ascending: true }),
-                    supabase.from('player_match_stats').select('*, players(*)').eq('match_id', activeMatch.id),
-                    supabase.from('matches').select('*, team1:teams!team1_id(*), team2:teams!team2_id(*)').eq('status', 'upcoming').order('created_at', { ascending: true }).limit(1).maybeSingle()
-                ]);
+                try {
+                    const results = await Promise.all([
+                        supabase.from('innings').select('*, striker:players!striker_id(*), bowler:players!bowler_id(*)').eq('match_id', activeMatch.id).order('innings_number', { ascending: true }),
+                        supabase.from('player_match_stats').select('*, players(*)').eq('match_id', activeMatch.id),
+                        supabase.from('matches').select('*, team1:teams!team1_id(*), team2:teams!team2_id(*)').eq('status', 'upcoming').order('created_at', { ascending: true }).limit(1).maybeSingle()
+                    ]);
 
-                if (results[0].data) setInnings(results[0].data);
-                if (results[1].data) setStats(results[1].data);
-                if (results[2].data) setNextMatch(results[2].data);
-            }
-
-            const { data: matchesList } = await supabase.from('matches')
-                .select('*, team1:teams!team1_id(*), team2:teams!team2_id(*)')
-                .order('created_at', { ascending: false });
-            
-            if (matchesList) {
-                setAllMatches(matchesList);
-                if (historyMatch) {
-                    const stillExists = matchesList.some(m => m.id === historyMatch.id);
-                    if (!stillExists) setHistoryMatch(null);
+                    if (results[0].error) console.error('Innings fetch error:', results[0].error);
+                    if (results[1].error) console.error('Stats fetch error:', results[1].error);
+                    
+                    if (results[0].data) setInnings(results[0].data);
+                    if (results[1].data) setStats(results[1].data);
+                    if (results[2].data) setNextMatch(results[2].data);
+                } catch (e) {
+                    console.error('Match details fetch crash:', e);
                 }
-            }
-
-            if (!activeMatch) {
+            } else {
                 setInnings([]);
                 setStats([]);
             }
 
-            // Fetch data with individual error handling to prevent one failure from breaking everything
-            const tRes = await supabase.from('teams').select('*').order('name');
-            const pRes = await supabase.from('players').select('*');
-            
-            let sRes: any = { data: null };
+            // 3. Fetch All Matches for History
+            let matchesList: any[] = [];
             try {
-                const { data, error } = await supabase.from('tournament_player_stats').select('*').order('total_runs', { ascending: false });
-                if (!error) sRes.data = data;
-            } catch (e) {
-                console.error('Tournament stats fetch error:', e);
-            }
-
-            if (tRes.error) console.error('Teams fetch error:', tRes.error);
-            if (pRes.error) console.error('Players fetch error:', pRes.error);
-
-            if (tRes.data) {
-                const pData = pRes.data || [];
-                const teamsWithPlayers = tRes.data.map(team => ({
-                    ...team,
-                    players: pData.filter(p => p.team_id === team.id)
-                }));
-                setTeamsData(teamsWithPlayers);
-
-                // Fetch team scores for points table
-                const { data: allTeamScores } = await supabase.from('team_scores').select('*');
-                if (matchesList && allTeamScores) {
-                    const table = calculatePointsTable(tRes.data, matchesList, allTeamScores);
-                    setPointsTable(table);
+                const { data, error } = await supabase.from('matches')
+                    .select('*, team1:teams!team1_id(*), team2:teams!team2_id(*), potm:players!player_of_the_match_id(*)')
+                    .order('created_at', { ascending: false });
+                
+                if (error) console.error('Matches list fetch error:', error);
+                if (data) {
+                    matchesList = data;
+                    setAllMatches(data);
+                    if (historyMatch) {
+                        const stillExists = data.some((m: any) => m.id === historyMatch.id);
+                        if (!stillExists) setHistoryMatch(null);
+                    }
                 }
+            } catch (e) {
+                console.error('Matches list fetch crash:', e);
             }
 
-            if (sRes.data) setTournamentStats(sRes.data);
+            // 4. Fetch Teams and Players
+            try {
+                const [tRes, pRes] = await Promise.all([
+                    supabase.from('teams').select('*').order('name'),
+                    supabase.from('players').select('*')
+                ]);
+
+                if (tRes.error) console.error('Teams fetch error:', tRes.error);
+                if (pRes.error) console.error('Players fetch error:', pRes.error);
+
+                if (tRes.data) {
+                    const pData = pRes.data || [];
+                    teamsWithPlayers = tRes.data.map(team => ({
+                        ...team,
+                        players: pData.filter(p => p.team_id === team.id)
+                    }));
+                    setTeamsData(teamsWithPlayers);
+
+                    // 5. Points Table Calculation (Depends on teams and matches)
+                    try {
+                        const { data: allInnings, error: innErr } = await supabase.from('innings').select('*');
+                        if (innErr) console.error('All innings fetch error:', innErr);
+                        if (matchesList.length > 0 && allInnings) {
+                            const table = calculatePointsTable(tRes.data, matchesList, allInnings);
+                            setPointsTable(table);
+                        }
+                    } catch (tableErr) {
+                        console.error('Points table calculation error:', tableErr);
+                    }
+                }
+            } catch (e) {
+                console.error('Teams/Players fetch crash:', e);
+            }
+
+            // 6. Tournament Stats (Leaderboard) - MANUAL AGGREGATION for Accuracy
+            try {
+                const [viewRes, rawStatsRes] = await Promise.all([
+                    supabase.from('tournament_player_stats').select('*').order('total_runs', { ascending: false }),
+                    supabase.from('player_match_stats').select('*, players(*)')
+                ]);
+
+                if (rawStatsRes.data) {
+                    const playersMap = new Map();
+                    rawStatsRes.data.forEach(stat => {
+                        const pid = stat.player_id;
+                        if (!playersMap.has(pid)) {
+                            playersMap.set(pid, {
+                                player_id: pid,
+                                first_name: stat.players?.first_name || 'Unknown',
+                                last_name: stat.players?.last_name || '',
+                                team_id: stat.players?.team_id,
+                                photo_url: stat.players?.photo_url || stat.players?.photo,
+                                total_runs: 0,
+                                total_balls: 0,
+                                total_wickets: 0,
+                                total_runs_conceded: 0,
+                                total_overs_bowled: 0,
+                                pot_score: 0,
+                                match_count: 0
+                            });
+                        }
+                        const p = playersMap.get(pid);
+                        p.total_runs += Number(stat.runs_scored || stat.runs || 0);
+                        p.total_balls += Number(stat.balls_faced || stat.balls || 0);
+                        p.total_wickets += Number(stat.wickets_taken || stat.wickets || 0);
+                        p.total_runs_conceded += Number(stat.runs_conceded || stat.runs_given || 0);
+                        p.total_overs_bowled += Number(stat.overs_bowled || stat.overs || 0);
+                        p.match_count++;
+                        // Standard POT score logic
+                        p.pot_score = p.total_runs + (p.total_wickets * 25);
+                    });
+
+                    const aggregated = Array.from(playersMap.values()).map(p => {
+                        const team = teamsWithPlayers.find(t => t.id === p.team_id);
+                        return { 
+                            ...p, 
+                            team_name: team?.name || 'Independent',
+                            // Ensure photo_url is properly passed
+                            photo_url: p.photo_url || null
+                        };
+                    }).sort((a, b) => (b.pot_score || 0) - (a.pot_score || 0));
+                    setTournamentStats(aggregated);
+                } else if (viewRes.data) {
+                    setTournamentStats(viewRes.data);
+                }
+            } catch (e) {
+                console.error('Tournament stats fetch crash:', e);
+            }
+
             setRealtimeStatus('connected');
         } catch (err) {
-            console.error('Fetch error:', err);
+            console.error('Global fetch error:', err);
             setRealtimeStatus('reconnecting');
         } finally {
             setLoading(false);
@@ -245,14 +339,18 @@ function ScoreboardContent() {
             .on('postgres_changes', { event: '*', table: 'player_match_stats', schema: 'public' }, () => fetchScore())
             .on('postgres_changes', { event: '*', table: 'players', schema: 'public' }, () => fetchScore())
             .on('postgres_changes', { event: '*', table: 'teams', schema: 'public' }, () => fetchScore())
-            .on('postgres_changes', { event: '*', table: 'match_events', schema: 'public' }, () => fetchScore())
+            .on('postgres_changes' as any, { event: '*', table: 'matches', schema: 'public' }, () => fetchScore())
+            .on('postgres_changes' as any, { event: '*', table: 'player_match_stats', schema: 'public' }, () => fetchScore())
             .subscribe((status) => {
                 if (status === 'SUBSCRIBED') setRealtimeStatus('connected');
                 else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') setRealtimeStatus('reconnecting');
             });
 
+        const pollInterval = setInterval(fetchScore, 1000);
+
         return () => { 
             if (fetchTimeout.current) clearTimeout(fetchTimeout.current);
+            clearInterval(pollInterval);
             supabase.removeChannel(channel); 
         };
     }, []);
@@ -342,28 +440,29 @@ function ScoreboardContent() {
                     </div>
                     
                     {/* Realtime Status Indicator */}
-                    <div style={{ 
-                        marginTop: '10px', 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        gap: '6px', 
-                        padding: '4px 12px', 
-                        borderRadius: '12px', 
-                        background: 'rgba(0,0,0,0.4)', 
-                        border: '1px solid rgba(255,255,255,0.05)',
-                        fontSize: '0.65rem',
-                        fontWeight: 900,
-                        letterSpacing: '1px',
-                        color: realtimeStatus === 'connected' ? '#00ff80' : '#ff4b4b'
-                    }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px' }}>
                         <div style={{ 
-                            width: '6px', 
-                            height: '6px', 
-                            borderRadius: '50%', 
-                            background: realtimeStatus === 'connected' ? '#00ff80' : '#ff4b4b',
-                            boxShadow: realtimeStatus === 'connected' ? '0 0 8px #00ff80' : 'none'
-                        }} />
-                        {realtimeStatus === 'connected' ? 'LIVE SYNC ACTIVE' : 'RECONNECTING...'}
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: '6px', 
+                            padding: '4px 12px', 
+                            borderRadius: '12px', 
+                            background: 'rgba(0,0,0,0.4)', 
+                            border: '1px solid rgba(255,255,255,0.05)',
+                            fontSize: '0.65rem',
+                            fontWeight: 900,
+                            letterSpacing: '1px',
+                            color: realtimeStatus === 'connected' ? '#00ff80' : '#ff4b4b'
+                        }}>
+                            <div style={{ 
+                                width: '6px', 
+                                height: '6px', 
+                                borderRadius: '50%', 
+                                background: realtimeStatus === 'connected' ? '#00ff80' : '#ff4b4b',
+                                boxShadow: realtimeStatus === 'connected' ? '0 0 8px #00ff80' : 'none'
+                            }} />
+                            {realtimeStatus === 'connected' ? 'LIVE SYNC ACTIVE' : 'RECONNECTING...'}
+                        </div>
                     </div>
                 </div>
 
@@ -406,7 +505,82 @@ function ScoreboardContent() {
 
                         <p style={{ color: 'var(--text-muted)', letterSpacing: '4px', fontWeight: 700, fontSize: 'clamp(0.7rem, 3vw, 1rem)', margin: '20px 0 60px', textTransform: 'uppercase', padding: '0 20px' }}>Join us for an extraordinary celebration of Keshav Cup Cricket Tournament</p>
 
-                        <div style={{ height: '1px', background: 'linear-gradient(90deg, transparent, rgba(255,215,0,0.3), transparent)', width: '300px', margin: '0 auto 20px' }} />
+                        <div style={{ height: '1px', background: 'linear-gradient(90deg, transparent, rgba(255,215,0,0.3), transparent)', width: '300px', margin: '0 auto 40px' }} />
+
+                        {/* Tournament Award Previews */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '25px', maxWidth: '1000px', margin: '0 auto' }}>
+                            {/* Best Batsman Card */}
+                            <div className="glass premium hover-scale" style={{ padding: '30px', borderRadius: '35px', textAlign: 'center' }}>
+                                <Trophy size={32} color="var(--primary)" style={{ marginBottom: '15px' }} />
+                                <div style={{ fontSize: '0.7rem', fontWeight: 950, color: 'var(--text-muted)', letterSpacing: '2px', textTransform: 'uppercase' }}>BEST BATSMAN</div>
+                                {(() => {
+                                    const best = [...tournamentStats]
+                                        .filter(s => (s.total_runs || 0) > 0)
+                                        .sort((a,b) => {
+                                            if ((b.total_runs || 0) !== (a.total_runs || 0)) return (b.total_runs || 0) - (a.total_runs || 0);
+                                            return (b.strike_rate || 0) - (a.strike_rate || 0);
+                                        })[0];
+                                    if (best) {
+                                        return (
+                                            <>
+                                                <div style={{ fontSize: '1.2rem', fontWeight: 950, color: '#fff', marginTop: '10px' }}>{best.first_name} {best.last_name}</div>
+                                                <div style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--primary)', marginTop: '5px' }}>{best.total_runs} <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>RUNS</span></div>
+                                                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'rgba(255,255,255,0.2)', marginTop: '4px' }}>
+                                                    SR: {(best.total_balls_faced || 0) > 0 ? (((best.total_runs || 0) / best.total_balls_faced) * 100).toFixed(1) : (best.strike_rate || '0.0')}
+                                                </div>
+                                            </>
+                                        );
+                                    }
+                                    return <div style={{ color: 'rgba(255,255,255,0.1)', marginTop: '15px', fontWeight: 900 }}>---</div>;
+                                })()}
+                            </div>
+
+                            {/* Best Bowler Card */}
+                            <div className="glass premium hover-scale" style={{ padding: '30px', borderRadius: '35px', textAlign: 'center', border: '1px solid rgba(0,255,128,0.1)' }}>
+                                <Target size={32} color="#00ff80" style={{ marginBottom: '15px' }} />
+                                <div style={{ fontSize: '0.7rem', fontWeight: 950, color: 'var(--text-muted)', letterSpacing: '2px', textTransform: 'uppercase' }}>BEST BOWLER</div>
+                                {(() => {
+                                    const best = [...tournamentStats]
+                                        .filter(s => (s.total_wickets || 0) > 0)
+                                        .sort((a,b) => {
+                                            if ((b.total_wickets || 0) !== (a.total_wickets || 0)) return (b.total_wickets || 0) - (a.total_wickets || 0);
+                                            return (a.economy || 0) - (b.economy || 0);
+                                        })[0];
+                                    if (best) {
+                                        return (
+                                            <>
+                                                <div style={{ fontSize: '1.2rem', fontWeight: 950, color: '#fff', marginTop: '10px' }}>{best.first_name} {best.last_name}</div>
+                                                <div style={{ fontSize: '1rem', fontWeight: 900, color: '#00ff80', marginTop: '5px' }}>{best.total_wickets} <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>WICKETS</span></div>
+                                                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'rgba(255,255,255,0.2)', marginTop: '4px' }}>
+                                                    ECON: {(best.total_overs_bowled || 0) > 0 ? ((best.total_runs_conceded || 0) / best.total_overs_bowled).toFixed(2) : (best.economy || '0.00')}
+                                                </div>
+                                            </>
+                                        );
+                                    }
+                                    return <div style={{ color: 'rgba(255,255,255,0.1)', marginTop: '15px', fontWeight: 900 }}>---</div>;
+                                })()}
+                            </div>
+
+                            {/* Player of the Tournament Card */}
+                            <div className="glass premium hover-scale shadow-premium" style={{ padding: '30px', borderRadius: '35px', textAlign: 'center', border: '1px solid var(--primary)', background: 'rgba(255,215,0,0.03)' }}>
+                                <Zap size={32} color="var(--primary)" style={{ marginBottom: '15px' }} />
+                                <div style={{ fontSize: '0.7rem', fontWeight: 950, color: 'var(--primary)', letterSpacing: '2px', textTransform: 'uppercase' }}>PLAYER OF TOURNAMENT</div>
+                                {(() => {
+                                    const best = [...tournamentStats]
+                                        .sort((a,b) => (b.pot_score || 0) - (a.pot_score || 0))[0];
+                                    if (best && (best.total_runs > 0 || best.total_wickets > 0)) {
+                                        return (
+                                            <>
+                                                <div style={{ fontSize: '1.2rem', fontWeight: 950, color: '#fff', marginTop: '10px' }}>{best.first_name} {best.last_name}</div>
+                                                <div style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--primary)', marginTop: '5px' }}>{Math.round(best.pot_score)} <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>POINTS</span></div>
+                                                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'rgba(255,255,255,0.3)', marginTop: '4px' }}>{best.total_runs}R • {best.total_wickets}W</div>
+                                            </>
+                                        );
+                                    }
+                                    return <div style={{ color: 'rgba(255,255,255,0.1)', marginTop: '15px', fontWeight: 900 }}>---</div>;
+                                })()}
+                            </div>
+                        </div>
                     </div>
                 )}
 
@@ -496,7 +670,10 @@ function ScoreboardContent() {
                                     {tournamentStats.filter(s => (s.total_runs || 0) > 0).length > 0 ? (
                                         [...tournamentStats]
                                             .filter(s => (s.total_runs || 0) > 0)
-                                            .sort((a,b) => (b.total_runs || 0) - (a.total_runs || 0))
+                                            .sort((a,b) => {
+                                                if ((b.total_runs || 0) !== (a.total_runs || 0)) return (b.total_runs || 0) - (a.total_runs || 0);
+                                                return (b.strike_rate || 0) - (a.strike_rate || 0);
+                                            })
                                             .slice(0, 5)
                                             .map((s, idx) => (
                                             <div key={s.player_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 25px', background: 'rgba(255,255,255,0.02)', borderRadius: '24px', border: '1px solid rgba(255,255,255,0.03)', transition: 'all 0.2s' }} className="hover-scale">
@@ -514,7 +691,12 @@ function ScoreboardContent() {
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <div style={{ fontSize: '1.4rem', fontWeight: 950, color: 'var(--primary)' }}>{s.total_runs || 0} <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', letterSpacing: '1px' }}>RUNS</span></div>
+                                                <div style={{ textAlign: 'right' }}>
+                                                    <div style={{ fontSize: '1.4rem', fontWeight: 950, color: 'var(--primary)' }}>{s.total_runs || 0} <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', letterSpacing: '1px' }}>RUNS</span></div>
+                                                    <div style={{ fontSize: '0.65rem', fontWeight: 800, color: 'rgba(255,255,255,0.4)' }}>
+                                                        SR: {(s.total_balls_faced || 0) > 0 ? (((s.total_runs || 0) / s.total_balls_faced) * 100).toFixed(1) : (s.strike_rate || '0.0')}
+                                                    </div>
+                                                </div>
                                             </div>
                                         ))
                                     ) : (
@@ -538,7 +720,11 @@ function ScoreboardContent() {
                                     {tournamentStats.filter(s => (s.total_wickets || 0) > 0).length > 0 ? (
                                         [...tournamentStats]
                                             .filter(s => (s.total_wickets || 0) > 0)
-                                            .sort((a,b) => (b.total_wickets || 0) - (a.total_wickets || 0))
+                                            .sort((a,b) => {
+                                                if ((b.total_wickets || 0) !== (a.total_wickets || 0)) return (b.total_wickets || 0) - (a.total_wickets || 0);
+                                                // Economy Tie-breaker (Lower is better)
+                                                return (a.economy || 0) - (b.economy || 0);
+                                            })
                                             .slice(0, 5)
                                             .map((s, idx) => (
                                             <div key={s.player_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 25px', background: 'rgba(255,255,255,0.02)', borderRadius: '24px', border: '1px solid rgba(255,255,255,0.03)', transition: 'all 0.2s' }} className="hover-scale">
@@ -556,7 +742,12 @@ function ScoreboardContent() {
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <div style={{ fontSize: '1.4rem', fontWeight: 950, color: '#00ff80' }}>{s.total_wickets || 0} <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', letterSpacing: '1px' }}>WKTS</span></div>
+                                                <div style={{ textAlign: 'right' }}>
+                                                    <div style={{ fontSize: '1.4rem', fontWeight: 950, color: '#00ff80' }}>{s.total_wickets || 0} <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', letterSpacing: '1px' }}>WKTS</span></div>
+                                                    <div style={{ fontSize: '0.65rem', fontWeight: 800, color: 'rgba(255,255,255,0.4)' }}>
+                                                        ECON: {(s.total_overs_bowled || 0) > 0 ? ((s.total_runs_conceded || 0) / s.total_overs_bowled).toFixed(2) : (s.economy || '0.00')}
+                                                    </div>
+                                                </div>
                                             </div>
                                         ))
                                     ) : (
@@ -568,6 +759,7 @@ function ScoreboardContent() {
                                 </div>
                             </div>
                         </div>
+
                     </section>
                 )}
 
@@ -895,8 +1087,26 @@ function ScoreboardContent() {
                                                 </div>
                                             </div>
                                             {m.status === 'completed' && m.result_message && (
-                                                <div style={{ marginTop: '30px', padding: '15px', background: 'rgba(0,255,128,0.05)', borderRadius: '20px', border: '1px solid rgba(0,255,128,0.1)', textAlign: 'center', fontSize: '0.85rem', fontWeight: 800, color: '#00ff80' }}>
+                                                <div style={{ marginTop: '20px', padding: '15px', background: 'rgba(0,255,128,0.05)', borderRadius: '20px', border: '1px solid rgba(0,255,128,0.1)', textAlign: 'center', fontSize: '0.85rem', fontWeight: 800, color: '#00ff80' }}>
                                                     {m.result_message}
+                                                </div>
+                                            )}
+
+                                            {m.potm && (
+                                                <div style={{ 
+                                                    marginTop: '15px', 
+                                                    display: 'flex', 
+                                                    alignItems: 'center', 
+                                                    gap: '10px', 
+                                                    padding: '10px 15px', 
+                                                    background: 'rgba(255,215,0,0.05)', 
+                                                    borderRadius: '15px', 
+                                                    border: '1px solid rgba(255,215,0,0.2)' 
+                                                }}>
+                                                    <Trophy size={14} color="var(--primary)" />
+                                                    <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--primary)' }}>
+                                                        POTM: {m.potm.first_name} {m.potm.last_name}
+                                                    </span>
                                                 </div>
                                             )}
                                         </div>
@@ -911,19 +1121,41 @@ function ScoreboardContent() {
                                     
                                     {historyMatch.result_message && (
                                         <div style={{ 
-                                            display: 'inline-flex', 
+                                            display: 'flex', 
+                                            flexDirection: 'column',
                                             alignItems: 'center', 
-                                            gap: '10px', 
-                                            padding: '12px 25px', 
-                                            borderRadius: '20px', 
-                                            background: 'rgba(0,255,128,0.1)', 
-                                            border: '1px solid rgba(0,255,128,0.3)',
+                                            gap: '10px',
                                             marginTop: '15px'
                                         }}>
-                                            <Trophy size={20} color="#00ff80" />
-                                            <span style={{ fontSize: '1rem', fontWeight: 950, color: '#00ff80', textTransform: 'uppercase' }}>
-                                                {historyMatch.result_message}
-                                            </span>
+                                            <div style={{ 
+                                                display: 'inline-flex', 
+                                                alignItems: 'center', 
+                                                gap: '10px', 
+                                                padding: '12px 25px', 
+                                                borderRadius: '20px', 
+                                                background: 'rgba(0,255,128,0.1)', 
+                                                border: '1px solid rgba(0,255,128,0.3)'
+                                            }}>
+                                                <Trophy size={20} color="#00ff80" />
+                                                <span style={{ fontSize: '1rem', fontWeight: 950, color: '#00ff80', textTransform: 'uppercase' }}>
+                                                    {historyMatch.result_message}
+                                                </span>
+                                            </div>
+
+                                            {historyMatch.potm && (
+                                                <div style={{ 
+                                                    display: 'flex', 
+                                                    alignItems: 'center', 
+                                                    gap: '12px', 
+                                                    padding: '12px 25px', 
+                                                    background: 'rgba(255,215,0,0.05)', 
+                                                    borderRadius: '20px', 
+                                                    border: '1px solid var(--primary)' 
+                                                }}>
+                                                    <Star size={18} color="var(--primary)" />
+                                                    <span style={{ fontWeight: 950, color: 'var(--primary)' }}>PLAYER OF THE MATCH: {historyMatch.potm.first_name} {historyMatch.potm.last_name}</span>
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>
