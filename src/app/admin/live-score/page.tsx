@@ -9,7 +9,7 @@ import Navbar from '@/components/Navbar';
 import {
     ChevronRight, Settings, Users, Save, Play, Square, Trophy, Target, TrendingUp, Hand,
     UserCheck, Search, Trash2, Shield, User, Loader2, Plus, Zap, RefreshCw,
-    ChevronLeft, UserPlus, Activity, Download
+    ChevronLeft, UserPlus, Activity, Download, History
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import RoleGuard from '@/components/RoleGuard';
@@ -25,6 +25,7 @@ export default function AdminLiveScorePage() {
 function AdminLiveScoreContent() {
     // UI State
     const [view, setView] = useState<'matches' | 'create' | 'squad' | 'toss' | 'scoring' | 'stats' | 'report'>('matches');
+    const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [activeMatch, setActiveMatch] = useState<any>(null);
 
@@ -45,7 +46,7 @@ function AdminLiveScoreContent() {
         team1_id: '',
         team2_id: '',
         venue: 'Main Stadium',
-        max_overs: '8'
+        max_overs: '6'
     });
 
     const [tossData, setTossData] = useState({
@@ -62,7 +63,7 @@ function AdminLiveScoreContent() {
     const [selectedWicketType, setSelectedWicketType] = useState('Bowled');
     const [dismissedId, setDismissedId] = useState('');
     const [firstInningsRuns, setFirstInningsRuns] = useState<number | null>(null);
-    const [scoringTab, setScoringTab] = useState<'live' | 'team_a' | 'team_b'>('live');
+    const [scoringTab, setScoringTab] = useState<'live' | 'team_a' | 'team_b' | 'history'>('live');
     const [matchEvents, setMatchEvents] = useState<any[]>([]);
     const [potmList, setPotmList] = useState<any[]>([]);
     const [showPotmModal, setShowPotmModal] = useState(false);
@@ -858,8 +859,16 @@ function AdminLiveScoreContent() {
                                             <button onClick={() => handleContinueMatch(m)} className="btn-primary" style={{ flex: 1, fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
                                                 <Activity size={16} /> {m.status === 'live' ? 'CONTINUE' : 'CONTINUE'}
                                             </button>
-                                            <button onClick={() => downloadReport(m)} className="btn-secondary" style={{ flex: 1, fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', border: '1px solid var(--primary)', color: 'var(--primary)' }}>
-                                                <Download size={16} /> REPORT
+                                            <button 
+                                                onClick={() => {
+                                                    setSelectedMatchId(m.id);
+                                                    setView('report');
+                                                    fetchMatchEvents(m.id);
+                                                }} 
+                                                className="btn-secondary" 
+                                                style={{ flex: 1, fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', border: '1px solid var(--primary)', color: 'var(--primary)' }}
+                                            >
+                                                <History size={16} /> TIMELINE
                                             </button>
                                             <button
                                                 onClick={() => handleDeleteMatch(m.id)}
@@ -1105,18 +1114,18 @@ function AdminLiveScoreContent() {
                     {view === 'scoring' && currentInnings && (
                         <motion.div key="scoring" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                             {/* Team Switcher */}
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', maxWidth: '800px', margin: '0 auto 20px auto' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', maxWidth: '900px', margin: '0 auto 20px auto' }}>
                                 <button
                                     onClick={() => setScoringTab('team_a')}
                                     className={scoringTab === 'team_a' ? 'btn-primary' : 'btn-secondary'}
-                                    style={{ padding: '15px 5px', fontSize: '0.75rem', fontWeight: 900, textTransform: 'uppercase' }}
+                                    style={{ padding: '15px 5px', fontSize: '0.7rem', fontWeight: 900, textTransform: 'uppercase' }}
                                 >
                                     {getTeamName(activeMatch?.team1_id)}
                                 </button>
                                 <button
                                     onClick={() => setScoringTab('team_b')}
                                     className={scoringTab === 'team_b' ? 'btn-primary' : 'btn-secondary'}
-                                    style={{ padding: '15px 5px', fontSize: '0.75rem', fontWeight: 900, textTransform: 'uppercase' }}
+                                    style={{ padding: '15px 5px', fontSize: '0.7rem', fontWeight: 900, textTransform: 'uppercase' }}
                                 >
                                     {getTeamName(activeMatch?.team2_id)}
                                 </button>
@@ -1124,9 +1133,16 @@ function AdminLiveScoreContent() {
                                     onClick={() => setScoringTab('live')}
                                     disabled={activeMatch.status === 'completed'}
                                     className={scoringTab === 'live' ? 'btn-primary' : 'btn-secondary'}
-                                    style={{ padding: '15px 5px', fontSize: '0.75rem', fontWeight: 900, opacity: activeMatch.status === 'completed' ? 0.3 : 1 }}
+                                    style={{ padding: '15px 5px', fontSize: '0.7rem', fontWeight: 900, textTransform: 'uppercase', opacity: activeMatch.status === 'completed' ? 0.3 : 1 }}
                                 >
-                                    LIVE SCORING
+                                    LIVE
+                                </button>
+                                <button
+                                    onClick={() => setScoringTab('history')}
+                                    className={scoringTab === 'history' ? 'btn-primary' : 'btn-secondary'}
+                                    style={{ padding: '15px 5px', fontSize: '0.7rem', fontWeight: 900, textTransform: 'uppercase' }}
+                                >
+                                    HISTORY
                                 </button>
                             </div>
 
@@ -1302,6 +1318,25 @@ function AdminLiveScoreContent() {
                                     forcedTeamId={scoringTab === 'team_a' ? activeMatch.team1_id : activeMatch.team2_id} 
                                 />
                             )}
+                            {scoringTab === 'history' && (
+                                <MatchTimeline events={matchEvents} match={activeMatch} players={[...matchPlayersA, ...matchPlayersB]} />
+                            )}
+                        </motion.div>
+                    )}
+
+                    {view === 'report' && (
+                        <motion.div key="report" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                            <div className="glass" style={{ padding: '40px', borderRadius: '30px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+                                    <h2 style={{ fontWeight: 950 }}>MATCH <span style={{ color: 'var(--primary)' }}>TIMELINE</span></h2>
+                                    <button onClick={() => setView('matches')} className="btn-secondary">BACK TO MATCHES</button>
+                                </div>
+                                <MatchTimeline 
+                                    events={matchEvents} 
+                                    match={matches.find(m => m.id === selectedMatchId)} 
+                                    players={[...matchPlayersA, ...matchPlayersB]}
+                                />
+                            </div>
                         </motion.div>
                     )}
 
@@ -1461,6 +1496,93 @@ function AdminLiveScoreContent() {
                 }
             `}</style>
         </main>
+    );
+}
+
+function MatchTimeline({ events, match, players }: { events: any[], match: any, players: any[] }) {
+    if (!events || events.length === 0) {
+        return <div style={{ textAlign: 'center', padding: '50px', color: 'var(--text-muted)', fontWeight: 800 }}>No match history available yet.</div>;
+    }
+
+    // Group events by innings and then by over
+    const inningsGrouped = events.reduce((acc: any, event: any) => {
+        const innId = event.innings_id || 'unknown';
+        if (!acc[innId]) acc[innId] = [];
+        acc[innId].push(event);
+        return acc;
+    }, {});
+
+    const getPlayerName = (id: string) => {
+        const p = players.find(p => p.id === id);
+        return p ? `${p.first_name} ${p.last_name}` : 'Unknown';
+    };
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '40px' }}>
+            {Object.keys(inningsGrouped).sort().reverse().map((innId, idx) => {
+                const innEvents = inningsGrouped[innId];
+                const oversGrouped: any = {};
+                innEvents.forEach((e: any) => {
+                    const overNum = Math.floor(e.over_number || 0);
+                    if (!oversGrouped[overNum]) oversGrouped[overNum] = [];
+                    oversGrouped[overNum].push(e);
+                });
+
+                return (
+                    <div key={innId}>
+                        <div style={{ padding: '10px 20px', background: 'rgba(255,255,255,0.05)', borderRadius: '15px', display: 'inline-block', marginBottom: '20px', fontWeight: 950, color: 'var(--primary)', letterSpacing: '1px' }}>
+                            INNINGS {Object.keys(inningsGrouped).length - idx}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                            {Object.keys(oversGrouped).sort((a:any, b:any) => b - a).map((overNum: any) => {
+                                const ballEvents = oversGrouped[overNum].sort((a:any, b:any) => a.ball_number - b.ball_number);
+                                const totalRunsInOver = ballEvents.reduce((sum: number, e: any) => sum + (e.runs || 0), 0);
+                                const wicketsInOver = ballEvents.filter((e: any) => e.is_wicket).length;
+                                const currentBowlerId = ballEvents[0]?.bowler_id;
+
+                                return (
+                                    <div key={overNum} className="glass" style={{ borderRadius: '25px', overflow: 'hidden' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 25px', background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid var(--border)' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                                                <div style={{ fontSize: '1.2rem', fontWeight: 950 }}>OVER {Number(overNum) + 1}</div>
+                                                <div style={{ width: '1px', height: '20px', background: 'var(--border)' }} />
+                                                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700 }}>BOWLER: <span style={{ color: '#fff' }}>{getPlayerName(currentBowlerId)}</span></div>
+                                            </div>
+                                            <div style={{ fontSize: '0.9rem', fontWeight: 900 }}>
+                                                {totalRunsInOver} RUNS {wicketsInOver > 0 && <span style={{ color: '#ff4b4b' }}>• {wicketsInOver} WICKET{wicketsInOver > 1 ? 'S' : ''}</span>}
+                                            </div>
+                                        </div>
+                                        <div style={{ padding: '15px 25px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                            {ballEvents.map((e: any, i: number) => (
+                                                <div key={e.id} style={{ display: 'grid', gridTemplateColumns: '50px 1fr auto', alignItems: 'center', gap: '20px', padding: '8px 0', borderBottom: i === ballEvents.length - 1 ? 'none' : '1px dashed rgba(255,255,255,0.05)' }}>
+                                                    <div style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--text-muted)' }}>{overNum}.{e.ball_number}</div>
+                                                    <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>
+                                                        <span style={{ fontWeight: 800 }}>{getPlayerName(e.batsman_id)}</span>
+                                                        {e.event_type === 'wide' && <span style={{ color: '#ffd700', marginLeft: '10px', fontSize: '0.7rem', fontWeight: 900 }}>WIDE</span>}
+                                                        {e.is_wicket && <span style={{ color: '#ff4b4b', marginLeft: '10px', fontSize: '0.7rem', fontWeight: 900 }}>OUT ({e.wicket_type})</span>}
+                                                    </div>
+                                                    <div style={{
+                                                        width: '35px', height: '35px', borderRadius: '10px', 
+                                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                        background: e.runs === 4 ? 'rgba(0,100,255,0.2)' : e.runs === 6 ? 'rgba(0,255,128,0.2)' : e.is_wicket ? 'rgba(255,75,75,0.2)' : 'rgba(255,255,255,0.05)',
+                                                        color: e.runs === 4 ? '#4ba3ff' : e.runs === 6 ? '#00ff80' : e.is_wicket ? '#ff4b4b' : '#fff',
+                                                        border: '1px solid',
+                                                        borderColor: e.runs === 4 ? '#4ba3ff' : e.runs === 6 ? '#00ff80' : e.is_wicket ? '#ff4b4b' : 'transparent',
+                                                        fontWeight: 950, fontSize: '1rem'
+                                                    }}>
+                                                        {e.is_wicket ? 'W' : e.runs}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
     );
 }
 

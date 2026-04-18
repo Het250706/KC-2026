@@ -104,7 +104,7 @@ function ScoreboardContent() {
             if (inn1 && inn2) {
                 // Team 1 Stats
                 team1.runsScored += inn1.runs || 0;
-                const oversFaced1 = inn1.wickets >= 10 ? (m.max_overs || 8) : (inn1.overs || 0);
+                const oversFaced1 = inn1.wickets >= 10 ? (m.max_overs || 6) : (inn1.overs || 0);
                 team1.oversFaced += convertOversToBalls(oversFaced1) / 6;
 
                 team2.runsConceded += inn1.runs || 0;
@@ -112,7 +112,7 @@ function ScoreboardContent() {
 
                 // Team 2 Stats
                 team2.runsScored += inn2.runs || 0;
-                const oversFaced2 = inn2.wickets >= 10 ? (m.max_overs || 8) : (inn2.overs || 0);
+                const oversFaced2 = inn2.wickets >= 10 ? (m.max_overs || 6) : (inn2.overs || 0);
                 team2.oversFaced += convertOversToBalls(oversFaced2) / 6;
 
                 team1.runsConceded += inn2.runs || 0;
